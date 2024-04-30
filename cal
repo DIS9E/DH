@@ -1,0 +1,60 @@
+from decimal import Decimal
+
+def calculate_commission(sales, grade):
+    if grade == "영세":
+        commission_rates = [Decimal('0.0012'), Decimal('0.0028'), Decimal('0.004'), Decimal('0.001')]
+    elif grade == "중소1":
+        commission_rates = [Decimal('0.0006'), Decimal('0.0014'), Decimal('0.002'), Decimal('0.0005')]
+    elif grade == "중소2":
+        commission_rates = [Decimal('0.00036'), Decimal('0.00084'), Decimal('0.0012'), Decimal('0.0004')]
+    elif grade == "중소3":
+        commission_rates = [Decimal('0.00036'), Decimal('0.00084'), Decimal('0.0012'), Decimal('0.0004')]
+    elif grade == "일반":
+        commission_rates = [Decimal('0.00018'), Decimal('0.00042'), Decimal('0.0006'), Decimal('0.0002')]
+    else:
+        return Decimal('0')
+
+    call_operation_commission = int(sales * commission_rates[0] / 12)
+    field_operation_commission = int(sales * commission_rates[1] / 12)
+    call_field_operation_commission = int(sales * commission_rates[2] / 12)
+    management_commission = int(sales * commission_rates[3] / 12)
+
+    return call_operation_commission, field_operation_commission, call_field_operation_commission, management_commission
+
+def main():
+    while True:
+        try:
+            sales_str = input("매출을 입력하세요(만원): ")
+            sales_str = sales_str.replace(',', '')
+            sales = Decimal(sales_str)*10000
+            if sales < 0:
+                print("음수 매출은 입력할 수 없습니다. 다시 입력해주세요.")
+                continue
+
+            if sales < 300000000:
+                grade = "영세"
+                print('영세')
+            elif 300000000 <= sales < 500000000:
+                grade = "중소1"
+                print('중소1')
+            elif 500000000 <= sales <= 1000000000:
+                grade = "중소2"
+                print('중소2')
+            elif 1000000000 < sales <= 3000000000:
+                grade = "중소3"
+                print('중소3')
+            else:
+                grade = "일반"
+                print('일반')
+
+            call_operation_commission, field_operation_commission, call_field_operation_commission, management_commission = calculate_commission(sales, grade)
+
+            print("콜 영업 수수료:", '{:,}'.format(call_operation_commission))
+            print("현장영업 수수료:", '{:,}'.format(field_operation_commission))
+            print("콜+현장영업 수수료:", '{:,}'.format(call_field_operation_commission))
+            print("관리수수료:", '{:,}'.format(management_commission))
+        except ValueError:
+            print("올바른 형식으로 매출을 입력하세요.")
+
+if __name__ == "__main__":
+    main()
