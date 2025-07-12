@@ -3,6 +3,7 @@ import json
 import os
 from bs4 import BeautifulSoup, NavigableString, Tag
 from urllib.parse import urljoin
+from requests.auth import HTTPBasicAuth
 
 # ✅ 환경변수로부터 인증 정보 불러오기
 WP_USERNAME = os.getenv("WP_USERNAME")
@@ -132,7 +133,13 @@ def post_to_wordpress(title, content, tags):
         "status": "publish",
         "tags": tags  # ✅ 태그 포함
     }
-    res = requests.post(WP_API_URL, headers=HEADERS, json=data)
+
+    res = requests.post(
+        WP_API_URL,
+        headers=HEADERS,
+        json=data,
+        auth=HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
+    )
 
     print(f"📡 [응답 코드] {res.status_code}")
     print(f"📨 [응답 본문] {res.text[:500]}")
