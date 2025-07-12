@@ -1,2 +1,2 @@
 #!/bin/bash
-python udf.name.py
+python3 udf.name.py
