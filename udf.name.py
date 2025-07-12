@@ -132,7 +132,7 @@ def post_to_wordpress(title, content, tags):
         "status": "publish",
         "tags": tags  # ✅ 태그 포함
     }
-    res = requests.post(WORDPRESS_API_URL, headers=HEADERS, json=data)
+    res = requests.post(WP_API_URL, headers=HEADERS, json=data)
 
     print(f"📡 [응답 코드] {res.status_code}")
     print(f"📨 [응답 본문] {res.text[:500]}")
