@@ -5,18 +5,18 @@ from bs4 import BeautifulSoup, NavigableString, Tag
 from urllib.parse import urljoin
 from requests.auth import HTTPBasicAuth
 
-# ✅ 환경변수로부터 인증 정보 불러오기
+# ✅ 환경변수 불러오기
 WP_USERNAME = os.getenv("WP_USERNAME")
 WP_APP_PASSWORD = os.getenv("WP_APP_PASSWORD")
 WP_API_URL = "https://belatri.info/wp-json/wp/v2/posts"
 TAG_API_URL = "https://belatri.info/wp-json/wp/v2/tags"
-
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
 UDF_BASE_URL = "https://udf.name/news/"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 SEEN_FILE = "seen_urls.json"
 
-# ✅ 이전에 본 URL 로딩
+# ✅ 이전 URL 불러오기
 def load_seen_urls():
     if os.path.exists(SEEN_FILE):
         with open(SEEN_FILE, "r", encoding="utf-8") as f:
@@ -54,17 +54,11 @@ def extract_article(url):
         return None
 
     soup = BeautifulSoup(response.text, "html.parser")
-
     title = soup.find("h1", class_="newtitle")
-    title_text = title.get_text(strip=True) if title else "제목 없음"
-
     author = soup.find("div", class_="author")
-    author_text = author.get_text(strip=True) if author else "출처 없음"
-
     image = soup.find("img", class_="lazy")
-    image_url = "https://udf.name" + image["data-src"] if image else None
-
     content_block = soup.find("div", id="zooming")
+
     content_lines = []
     if content_block:
         for el in content_block.descendants:
@@ -79,14 +73,40 @@ def extract_article(url):
     content = content.replace("dle_leech_begin", "").replace("dle_leech_end", "").strip()
 
     return {
-        "title": title_text,
-        "author": author_text,
-        "image": image_url,
+        "title": title.get_text(strip=True) if title else "제목 없음",
+        "author": author.get_text(strip=True) if author else "출처 없음",
+        "image": "https://udf.name" + image["data-src"] if image else None,
         "url": url,
         "content": content
     }
 
-# ✅ ChatGPT 리라이팅 + 태그 추출
+# ✅ 이미지 업로드
+def upload_image_to_wordpress(image_url):
+    if not image_url:
+        return None
+    try:
+        img_data = requests.get(image_url).content
+        filename = image_url.split("/")[-1]
+        media_headers = {
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Content-Type": "image/jpeg",
+            "Authorization": f"Basic {requests.auth._basic_auth_str(WP_USERNAME, WP_APP_PASSWORD)}"
+        }
+        res = requests.post(
+            "https://belatri.info/wp-json/wp/v2/media",
+            headers=media_headers,
+            data=img_data
+        )
+        if res.status_code == 201:
+            return res.json()["id"]
+        else:
+            print(f"❌ 이미지 업로드 실패: {res.status_code}")
+            return None
+    except Exception as e:
+        print(f"❌ 이미지 처리 오류: {e}")
+        return None
+
+# ✅ GPT 리라이팅
 def rewrite_with_chatgpt(article):
     prompt = f"""
 다음은 벨라루스 관련 외신 기사입니다. 아래 양식에 맞춰 한국 독자를 위한 블로그 게시글을 작성해주세요.
@@ -95,11 +115,44 @@ def rewrite_with_chatgpt(article):
 - 기사 내용을 바탕으로 **요약하거나 해석하지 말고**, **문체와 구조만 바꿔서 재작성**해주세요.
 - **기사의 정보는 그대로 유지**하고, **한국어로 자연스럽고 가독성 높게** 작성해주세요.
 - **제목(H1), 부제(H2), 내용 문단(H3)** 등으로 구분해 블로그에 최적화된 구조로 작성해주세요.
-- **본문에서 주요 키워드를 추출해 태그용 키워드로 함께 제공**해주세요.
+- **이모지와 친절한 문체**, **by. 에디터 서명**, **관련 키워드 태그 포함**으로 구성해주세요.
+
+🧾 출력 형식:
+
+# [📰 제목]
+> 블로그 게시글의 핵심을 반영한 명확하고 간결한 제목
+
+## ✍️ 편집자 주
+- 전체 기사 맥락을 1~2문장으로 요약한 편집자 코멘트
+
+## 📌 핵심 내용
+### 📍 요약 문단 1
+### 📍 요약 문단 2
+
+## 🗞️ 원문 재작성 (구조 변경 중심)
+### 🌪️ [소제목 H3 - 주제1]
+- 문단 내용 충실히 유지하며 자연스럽게 풀어쓰기
+
+### ⚠️ [소제목 H3 - 주제2]
+- 이어지는 내용도 충분히 설명하며 구조적 리라이팅
+
+## 📎 관련 정보 또는 시사점
+- 추가 설명, 배경 맥락 정리
+
+## 🔗 출처
+- 원문 링크: {article["url"]}
+
+## 🏷️ 태그 키워드
+– 벨라루스  
+– 폭풍 피해  
+– 정전  
+– {article["author"]}  
+
+by. LEE🌳
 
 📰 기사 원문:
 {article["content"]}
-    """
+"""
     headers = {
         "Authorization": f"Bearer {OPENAI_API_KEY}",
         "Content-Type": "application/json"
@@ -110,10 +163,9 @@ def rewrite_with_chatgpt(article):
         "temperature": 0.4
     }
     res = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
-    result = res.json()["choices"][0]["message"]["content"]
-    return result
+    return res.json()["choices"][0]["message"]["content"]
 
-# ✅ 태그 자동 등록 (중복 확인 포함)
+# ✅ 태그 ID 생성
 def create_or_get_tag_id(tag_name):
     response = requests.get(TAG_API_URL, params={"search": tag_name})
     if response.status_code == 200 and response.json():
@@ -125,14 +177,16 @@ def create_or_get_tag_id(tag_name):
         return res.json()["id"]
     return None
 
-# ✅ WordPress 업로드
-def post_to_wordpress(title, content, tags):
+# ✅ 포스트 업로드
+def post_to_wordpress(title, content, tags, featured_image_id=None):
     data = {
         "title": title,
         "content": content,
         "status": "publish",
-        "tags": tags  # ✅ 태그 포함
+        "tags": tags
     }
+    if featured_image_id:
+        data["featured_media"] = featured_image_id
 
     res = requests.post(
         WP_API_URL,
@@ -140,10 +194,8 @@ def post_to_wordpress(title, content, tags):
         json=data,
         auth=HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     )
-
     print(f"📡 [응답 코드] {res.status_code}")
-    print(f"📨 [응답 본문] {res.text[:500]}")
-
+    print(f"📨 [응답 본문] {res.text[:300]}")
     return res.status_code == 201
 
 # ✅ 메인 실행
@@ -158,18 +210,25 @@ if __name__ == "__main__":
         article = extract_article(url)
         if not article or not article["content"]:
             continue
+
         rewritten = rewrite_with_chatgpt(article)
 
-        # 🎯 GPT 출력에서 태그 추출 (예: "- 초점 키프레이즈: 벨라루스 경제 위기")
-        tag_lines = [line for line in rewritten.splitlines() if "초점 키프레이즈:" in line]
-        tags = tag_lines[0].split(":", 1)[1].strip().split() if tag_lines else []
+        lines = rewritten.splitlines()
+        title_line = next((line for line in lines if line.startswith("# ")), article["title"])
+        title_clean = title_line.replace("# ", "").strip()
 
-        success = post_to_wordpress(article["title"], rewritten, tags)
+        tag_lines = [line for line in rewritten.splitlines() if "초점 키프레이즈:" in line]
+        tag_names = tag_lines[0].split(":", 1)[1].strip().split() if tag_lines else []
+        tag_ids = [create_or_get_tag_id(tag) for tag in tag_names]
+
+        image_id = upload_image_to_wordpress(article["image"])
+        success = post_to_wordpress(title_clean, rewritten, tag_ids, featured_image_id=image_id)
+
         if success:
-            print(f"✅ 업로드 성공: {article['title']}")
+            print(f"✅ 업로드 성공: {title_clean}")
             seen.add(url)
         else:
-            print(f"❌ 업로드 실패: {article['title']}")
+            print(f"❌ 업로드 실패: {title_clean}")
 
     save_seen_urls(seen)
     print("✅ 작업 완료")
