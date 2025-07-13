@@ -1,177 +1,190 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-udf.name.py – v3.1-no-media  (대표 이미지 WP 업로드 생략 버전)
-─────────────────────────────────────────────────────────────────────────────
-• 카테고리: ‘벨라루스 뉴스’(slug=belarus-news) ID 자동 조회
-• 태그: ChatGPT가 출력한 키프레이즈 → 동적 생성/지정
-• 대표 이미지: WP 업로드 생략, 본문 첫줄 <img src="..."> 삽입
-• 중복 방지: HTML 주석 <!--source_url:...--> + REST search
+udf.name.py – v3.3-style
+(대표 이미지 업로드 제거 · 중복 완전 차단 · 헤드라이트 톤 & Yoast 자동 입력)
 """
 
-import os, sys, json, time, logging, re
+import os, sys, json, time, re, logging
 from urllib.parse import urljoin, urlparse, urlunparse
 import requests
-from requests.auth import HTTPBasicAuth
 from bs4 import BeautifulSoup
 
-# ───────────────────── 1. 환경
-WP_URL          = os.getenv("WP_URL", "https://belatri.info").rstrip("/")
-WP_USERNAME     = os.getenv("WP_USERNAME")
-WP_APP_PASSWORD = os.getenv("WP_APP_PASSWORD")
-OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY")
+# ──────────────── 1. 환경 변수
+WP_URL   = os.getenv("WP_URL", "https://belatri.info").rstrip("/")
+USER     = os.getenv("WP_USERNAME")
+APP_PW   = os.getenv("WP_APP_PASSWORD")
+OPEN_KEY = os.getenv("OPENAI_API_KEY")
+if not all([USER, APP_PW, OPEN_KEY]):
+    sys.exit("❌  WP_USERNAME / WP_APP_PASSWORD / OPENAI_API_KEY 가 필요합니다.")
 
-if not all([WP_USERNAME, WP_APP_PASSWORD, OPENAI_API_KEY]):
-    sys.exit("❌  WP_USERNAME / WP_APP_PASSWORD / OPENAI_API_KEY 필요")
+POSTS = f"{WP_URL}/wp-json/wp/v2/posts"
+TAGS  = f"{WP_URL}/wp-json/wp/v2/tags"
+CATS  = f"{WP_URL}/wp-json/wp/v2/categories"
 
-WP_POSTS_API = f"{WP_URL}/wp-json/wp/v2/posts"
-WP_TAGS_API  = f"{WP_URL}/wp-json/wp/v2/tags"
-WP_CATS_API  = f"{WP_URL}/wp-json/wp/v2/categories"
+UDF_BASE  = "https://udf.name/news/"
+HEADERS   = {"User-Agent": "UDFCrawler/3.3-style"}
+CAT_SLUG  = "belarus-news"
+SEEN_FILE = "seen_urls.json"
 
-UDF_BASE      = "https://udf.name/news/"
-UA_HEADER     = {"User-Agent": "UDFCrawler/3.1-no-media"}
-SEEN_FILE     = "seen_urls.json"
-CATEGORY_SLUG = "belarus-news"
-
-# ───────────────────── 2. 카테고리 ID
-def get_category_id(slug: str) -> int:
-    r = requests.get(WP_CATS_API, params={"slug": slug, "per_page": 1},
-                     auth=HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD), timeout=20)
-    if r.status_code == 200 and r.json():
+# ──────────────── 2. 카테고리 ID 확보
+def get_cat_id(slug: str) -> int:
+    r = requests.get(CATS, params={"slug": slug, "per_page": 1},
+                     auth=(USER, APP_PW), timeout=20)
+    if r.ok and r.json():
         return r.json()[0]["id"]
-    c = requests.post(WP_CATS_API,
-                      json={"name": "벨라루스 뉴스", "slug": slug},
-                      auth=HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD), timeout=20)
-    c.raise_for_status();  return c.json()["id"]
+    c = requests.post(CATS, json={"name": "벨라루스 뉴스", "slug": slug},
+                      auth=(USER, APP_PW), timeout=20)
+    c.raise_for_status()
+    return c.json()["id"]
 
-CATEGORY_ID = get_category_id(CATEGORY_SLUG)
-print(f"✅ 카테고리 ID → {CATEGORY_ID}")
+CAT_ID = get_cat_id(CAT_SLUG)
 
-# ───────────────────── 3. 유틸
-def norm(u: str) -> str:
-    p = urlparse(u);  return urlunparse((p.scheme, p.netloc, p.path, "", "", ""))
+# ──────────────── 3. 유틸
+norm = lambda u: urlunparse(urlparse(u)._replace(query="", params="", fragment=""))
 
 def load_seen() -> set[str]:
     if os.path.exists(SEEN_FILE):
-        with open(SEEN_FILE, encoding="utf-8") as f: return set(json.load(f))
+        with open(SEEN_FILE, encoding="utf-8") as f:
+            return set(json.load(f))
     return set()
 
 def save_seen(s: set[str]):
     with open(SEEN_FILE, "w", encoding="utf-8") as f:
         json.dump(list(s), f, ensure_ascii=False, indent=2)
 
-# ───────────────────── 4. 링크
+# ──────────────── 4. 기사 링크 수집
 def fetch_links() -> list[str]:
-    soup = BeautifulSoup(requests.get(UDF_BASE, headers=UA_HEADER, timeout=10).text, "html.parser")
+    soup = BeautifulSoup(requests.get(UDF_BASE, headers=HEADERS, timeout=10).text, "html.parser")
     return list({norm(urljoin(UDF_BASE, a["href"]))
                  for a in soup.select("div.article1 div.article_title_news a[href]")})
 
-# ───────────────────── 5. 파싱
-def parse_article(url: str):
-    r = requests.get(url, headers=UA_HEADER, timeout=10)
-    if r.status_code != 200: return None
+# ──────────────── 5. 기사 파싱
+def parse(url: str):
+    r = requests.get(url, headers=HEADERS, timeout=10)
+    if not r.ok: return None
     s = BeautifulSoup(r.text, "html.parser")
-    t = s.find("h1", class_="newtitle");  b = s.find("div", id="zooming")
-    if not (t and b): return None
+    title = s.find("h1", class_="newtitle")
+    body  = s.find("div", id="zooming")
+    if not (title and body): return None
     img = s.find("img", class_="lazy") or s.find("img")
     img_url = urljoin(url, img.get("data-src") or img.get("src")) if img else None
-    return {"title": t.get_text(strip=True),
-            "html": str(b),
+    return {"title": title.get_text(strip=True),
+            "html": str(body),
             "image": img_url,
             "url": url}
 
-# ───────────────────── 6. GPT 리라이팅
-def rewrite(article: dict) -> str:
-    prompt = f"""
-다음은 벨라루스 관련 외신 기사입니다. 아래 양식에 맞춰 한국 독자를 위한 블로그 글을 작성해주세요.
-
-🎯 조건
-- 내용 요약·해석 금지, 문체·구조만 변경
-- 제목(H1)/부제(H2)/문단(H3)을 사용
-- 마지막 줄에 "이 기사는 벨라루스 현지 보도 내용을 재구성한 콘텐츠입니다." 추가
-- 맨 끝에 "🏷️ 태그 키워드: ..." 형식으로 관련 키프레이즈 3~6개를 쉼표로 출력
-
-📰 원문:
-{article['html']}
+# ──────────────── 6. 헤드라이트 톤 STYLE GUIDE + 프롬프트
+STYLE_GUIDE = """
+• 톤: 친근한 존댓말, 대화체. 질문·감탄 활용 (예: “무엇일까요?” “왜일까?”)
+• 구조:
+  📰 제목
+  ✍️ 편집자 주 — 핵심 2문장
+  🗞️ 본문
+    ‣ 소제목1: …
+    ‣ 소제목2: … (필요 시 3개까지)
+  🔦 헤드라이트's 코멘트 (300자 내외)
+  🏷️ 태그: 명사 3~6개
+— 본문은 키워드 요약 → Q&A 불릿 → 배경 해설 흐름을 유지
+— 마크다운 기호(#, ##, ###) 사용 금지
+— 사실 누락·요약 금지, 원문과 길이 비슷
 """
-    res = requests.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers={"Authorization": f"Bearer {OPENAI_API_KEY}",
+
+def rewrite(a):
+    prompt = f"""{STYLE_GUIDE}
+
+아래 원문을 규칙에 맞춰 재작성하세요.
+
+◆ 원문
+{a['html']}
+"""
+    res = requests.post("https://api.openai.com/v1/chat/completions",
+        headers={"Authorization": f"Bearer {OPEN_KEY}",
                  "Content-Type": "application/json"},
         json={"model":"gpt-4o",
               "messages":[{"role":"user","content":prompt}],
-              "temperature":0.3},
-        timeout=90)
+              "temperature":0.4}, timeout=90)
     res.raise_for_status()
     return res.json()["choices"][0]["message"]["content"]
 
-# ───────────────────── 7. 태그
-def extract_tag_names(text: str) -> list[str]:
-    m = re.search(r"태그 키워드\s*[:：]\s*(.+)", text)
+# ──────────────── 7. 태그 처리
+STOP = {"벨라루스", "뉴스", "기사"}
+def tag_names(txt: str):
+    m = re.search(r"🏷️\s*태그[^:：]*[:：]\s*(.+)", txt)
     if not m: return []
-    return [t.strip() for t in re.split(r"[,\s]+", m.group(1)) if t.strip()]
+    out = []
+    for t in re.split(r"[,\s]+", m.group(1)):
+        t = t.strip("–-#")
+        if 1 < len(t) <= 20 and t not in STOP and t not in out:
+            out.append(t)
+        if len(out) == 6: break
+    return out
 
-def create_or_get_tag_id(name: str) -> int | None:
-    q = requests.get(WP_TAGS_API, params={"search": name, "per_page": 1},
-                     auth=HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD), timeout=10)
-    if q.status_code==200 and q.json(): return q.json()[0]["id"]
-    c = requests.post(WP_TAGS_API, json={"name": name},
-                      auth=HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD), timeout=10)
-    return c.json().get("id") if c.status_code==201 else None
+def tag_id(name: str):
+    q = requests.get(TAGS, params={"search": name, "per_page": 1},
+                     auth=(USER, APP_PW), timeout=10)
+    if q.ok and q.json():
+        return q.json()[0]["id"]
+    c = requests.post(TAGS, json={"name": name},
+                      auth=(USER, APP_PW), timeout=10)
+    return c.json().get("id") if c.status_code == 201 else None
 
-# ───────────────────── 8. 중복 검사 (search + seen.json)
-def is_duplicate(url_norm: str) -> bool:
-    r = requests.get(WP_POSTS_API, params={"search": url_norm, "per_page": 1},
-                     auth=HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD), timeout=10)
-    return r.status_code==200 and bool(r.json())
+# ──────────────── 8. 중복 검사 (숨은 링크 검색)
+def exists(url_norm: str) -> bool:
+    r = requests.get(POSTS, params={"search": url_norm, "per_page": 1},
+                     auth=(USER, APP_PW), timeout=10)
+    return r.ok and bool(r.json())
 
-# ───────────────────── 9. 발행
-def publish(article, content, tag_ids):
-    # 대표 이미지: 본문 첫줄 <img> + hidden source_url
-    img_tag = f'<p><img src="{article["image"]}" alt=""></p>\n' if article["image"] else ""
-    hidden  = f'<!--source_url:{article["url"]}-->\n'
-    body    = hidden + img_tag + content
+# ──────────────── 9. 발행
+def publish(a, txt, tag_ids):
+    hidden = f'<a href="{a["url"]}" style="display:none">src</a>\n'
+    img_tag = f'<p><img src="{a["image"]}" alt=""></p>\n' if a["image"] else ""
+    body = hidden + img_tag + txt
 
-    title_line = next((l for l in content.splitlines() if l.startswith("# ")), article["title"])
-    title = title_line.lstrip("# ").strip()
+    title = next((l for l in txt.splitlines() if l.startswith("📰")), a["title"]).lstrip("📰").strip()
+    focus = (tag_ids and tag_ids[0]) or ""
+    meta  = re.search(r"✍️\s*편집자 주[^\n]*\n(.+)", txt)
+    meta  = (meta.group(1).strip()[:140]) if meta else ""
 
-    data = {
+    payload = {
         "title": title,
         "content": body,
         "status": "publish",
-        "categories": [CATEGORY_ID],
-        "tags": tag_ids
+        "categories": [CAT_ID],
+        "tags": tag_ids,
+        "meta": {
+            "yoast_wpseo_focuskw": focus,
+            "yoast_wpseo_metadesc": meta
+        }
     }
-    r = requests.post(WP_POSTS_API, json=data,
-                      auth=HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD), timeout=30)
-    print("  ↳ 게시 응답", r.status_code)
+    r = requests.post(POSTS, json=payload, auth=(USER, APP_PW), timeout=30)
+    print("  ↳ 게시", r.status_code, r.json().get("id"))
     r.raise_for_status()
-    print("  ↳ 📝 ID", r.json()["id"])
 
-# ───────────────────── 10. 메인
+# ──────────────── 10. 메인 실행
 def main():
     logging.basicConfig(level=logging.WARNING)
     seen = load_seen()
     links = fetch_links()
-    to_post = [u for u in links if norm(u) not in seen and not is_duplicate(norm(u))]
-    print(f"총 {len(links)}개 중 새 기사 {len(to_post)}개\n")
+    targets = [u for u in links if norm(u) not in seen and not exists(norm(u))]
+    print(f"📰 새 기사 {len(targets)} / 총 {len(links)}")
 
-    for url in to_post:
-        print("=== 처리:", url)
-        art = parse_article(url)
-        if not art: continue
+    for url in targets:
+        print("===", url)
+        art = parse(url)
+        if not art:
+            print("  파싱 실패"); continue
         try:
-            content = rewrite(art)
+            txt = rewrite(art)
         except Exception as e:
-            print("  ↳ GPT 오류", e); continue
+            print("  GPT 오류:", e); continue
 
-        tag_ids = [tid for n in extract_tag_names(content)
-                   if (tid := create_or_get_tag_id(n))]
+        tags = [tid for n in tag_names(txt) if (tid := tag_id(n))]
         try:
-            publish(art, content, tag_ids)
+            publish(art, txt, tags)
             seen.add(norm(url)); save_seen(seen)
         except Exception as e:
-            print("  ↳ 업로드 실패", e)
+            print("  업로드 실패:", e)
         time.sleep(2)
 
 if __name__ == "__main__":
