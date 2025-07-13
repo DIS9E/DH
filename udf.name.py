@@ -10,13 +10,14 @@ WP_USERNAME = os.getenv("WP_USERNAME")
 WP_APP_PASSWORD = os.getenv("WP_APP_PASSWORD")
 WP_API_URL = "https://belatri.info/wp-json/wp/v2/posts"
 TAG_API_URL = "https://belatri.info/wp-json/wp/v2/tags"
+MEDIA_API_URL = "https://belatri.info/wp-json/wp/v2/media"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 UDF_BASE_URL = "https://udf.name/news/"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 SEEN_FILE = "seen_urls.json"
 
-# ✅ URL 정규화 함수 (쿼리 파라미터 제거)
+# ✅ URL 정규화
 def normalize_url(url):
     parsed = urlparse(url)
     return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
@@ -32,38 +33,54 @@ def save_seen_urls(urls):
     with open(SEEN_FILE, "w", encoding="utf-8") as f:
         json.dump(list(urls), f, ensure_ascii=False, indent=2)
 
+# ✅ WordPress에서 이미 등록된 source_url 가져오기
+def get_existing_source_urls():
+    page = 1
+    existing_urls = set()
+    while True:
+        res = requests.get(
+            WP_API_URL,
+            params={"per_page": 100, "page": page},
+            auth=(WP_USERNAME, WP_APP_PASSWORD)
+        )
+        if res.status_code != 200:
+            break
+        posts = res.json()
+        if not posts:
+            break
+        for post in posts:
+            meta = post.get("meta", {})
+            url = meta.get("_source_url")
+            if url:
+                existing_urls.add(normalize_url(url))
+        page += 1
+    return existing_urls
+
 # ✅ 기사 링크 수집
 def get_article_links():
-    response = requests.get(UDF_BASE_URL, headers=HEADERS)
-    if response.status_code != 200:
-        print(f"❌ 메인 페이지 요청 실패: {response.status_code}")
+    res = requests.get(UDF_BASE_URL, headers=HEADERS)
+    if res.status_code != 200:
+        print(f"❌ 메인 페이지 요청 실패: {res.status_code}")
         return []
-
-    soup = BeautifulSoup(response.text, "html.parser")
+    soup = BeautifulSoup(res.text, "html.parser")
     links = []
     for a in soup.find_all("a", href=True):
         href = a["href"]
-        if (
-            href.startswith("https://udf.name/news/") and
-            href.endswith(".html") and
-            href.count("/") >= 5
-        ):
+        if href.startswith("https://udf.name/news/") and href.endswith(".html") and href.count("/") >= 5:
             links.append(normalize_url(href))
     return list(set(links))
 
 # ✅ 기사 내용 추출
 def extract_article(url):
-    response = requests.get(url, headers=HEADERS)
-    if response.status_code != 200:
-        print(f"❌ 요청 실패: {url} | {response.status_code}")
+    res = requests.get(url, headers=HEADERS)
+    if res.status_code != 200:
+        print(f"❌ 요청 실패: {url} | {res.status_code}")
         return None
-
-    soup = BeautifulSoup(response.text, "html.parser")
+    soup = BeautifulSoup(res.text, "html.parser")
     title = soup.find("h1", class_="newtitle")
     author = soup.find("div", class_="author")
     image = soup.find("img", class_="lazy")
     content_block = soup.find("div", id="zooming")
-
     content_lines = []
     if content_block:
         for el in content_block.descendants:
@@ -73,10 +90,8 @@ def extract_article(url):
                     content_lines.append(txt)
             elif isinstance(el, Tag) and el.name in ["p", "br"]:
                 content_lines.append("\n")
-
     content = "\n".join(line for line in content_lines if line.strip())
     content = content.replace("dle_leech_begin", "").replace("dle_leech_end", "").strip()
-
     return {
         "title": title.get_text(strip=True) if title else "제목 없음",
         "author": author.get_text(strip=True) if author else "출처 없음",
@@ -98,7 +113,7 @@ def upload_image_to_wordpress(image_url):
             "Authorization": f"Basic {requests.auth._basic_auth_str(WP_USERNAME, WP_APP_PASSWORD)}"
         }
         res = requests.post(
-            "https://belatri.info/wp-json/wp/v2/media",
+            MEDIA_API_URL,
             headers=media_headers,
             data=img_data
         )
@@ -149,8 +164,7 @@ def rewrite_with_chatgpt(article):
 
 ## 🏷️ 태그 키워드
 – 벨라루스  
-– 폭풍 피해  
-– 정전  
+– 정치  
 – {article["author"]}  
 
 by. LEE🌳
@@ -183,16 +197,18 @@ def create_or_get_tag_id(tag_name):
     return None
 
 # ✅ 포스트 업로드
-def post_to_wordpress(title, content, tags, featured_image_id=None):
+def post_to_wordpress(title, content, tags, featured_image_id=None, source_url=None):
     data = {
         "title": title,
         "content": content,
         "status": "publish",
-        "tags": tags
+        "tags": tags,
+        "meta": {
+            "_source_url": source_url  # 커스텀 필드로 원본 URL 저장
+        }
     }
     if featured_image_id:
         data["featured_media"] = featured_image_id
-
     res = requests.post(
         WP_API_URL,
         headers=HEADERS,
@@ -207,8 +223,9 @@ def post_to_wordpress(title, content, tags, featured_image_id=None):
 if __name__ == "__main__":
     print("🔍 크롤링 시작")
     seen = load_seen_urls()
+    existing = get_existing_source_urls()
     all_links = get_article_links()
-    new_links = [link for link in all_links if normalize_url(link) not in seen]
+    new_links = [link for link in all_links if normalize_url(link) not in seen and normalize_url(link) not in existing]
     print(f"📰 새 기사 수: {len(new_links)}")
 
     for url in new_links:
@@ -217,7 +234,6 @@ if __name__ == "__main__":
             continue
 
         rewritten = rewrite_with_chatgpt(article)
-
         lines = rewritten.splitlines()
         title_line = next((line for line in lines if line.startswith("# ")), article["title"])
         title_clean = title_line.replace("# ", "").strip()
@@ -227,12 +243,12 @@ if __name__ == "__main__":
         tag_ids = [create_or_get_tag_id(tag) for tag in tag_names]
 
         image_id = upload_image_to_wordpress(article["image"])
-        success = post_to_wordpress(title_clean, rewritten, tag_ids, featured_image_id=image_id)
+        success = post_to_wordpress(title_clean, rewritten, tag_ids, image_id, source_url=normalize_url(article["url"]))
 
         if success:
             print(f"✅ 업로드 성공: {title_clean}")
-            seen.add(normalize_url(url))  # ✅ 정규화 후 저장
-            save_seen_urls(seen)         # ✅ 바로 저장
+            seen.add(normalize_url(url))
+            save_seen_urls(seen)
         else:
             print(f"❌ 업로드 실패: {title_clean}")
 
