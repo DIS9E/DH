@@ -143,23 +143,26 @@ def tag_id(name: str):
 
 # ────────── 게시 ──────────
 def publish(article: dict, txt: str, tag_ids: list[int]):
-    hidden = f'<a href="{article["url"]}" style="display:none">src</a>\n'
+    hidden  = f'<a href="{article["url"]}" style="display:none">src</a>\n'
     img_tag = f'<p><img src="{article["image"]}" alt=""></p>\n' if article["image"] else ""
 
-    # ── 1) 제목 추출 ──
+    # 1) 포스트 제목 추출 (📰 줄에서)
     title_line = next((l for l in txt.splitlines() if l.startswith("📰")), article["title"])
     title = title_line.lstrip("📰").strip()
 
-    # ── 2) 본문에서 <h1> 또는 📰 줄 제거 → 중복 방지 ──
-    soup = BeautifulSoup(txt, "html.parser")
+    # 2) 코드블록(```…```)과 📰 제목 줄을 모두 제거한 뒤 HTML 파싱
+    clean_lines = [
+        l for l in txt.splitlines()
+        if not (l.strip().startswith("```") or l.strip().startswith("📰"))
+    ]
+    soup = BeautifulSoup("\n".join(clean_lines), "html.parser")
+
+    # 3) 본문에 중복 <h1> 있으면 삭제
     h1 = soup.find("h1")
     if h1 and title in h1.get_text(strip=True):
         h1.decompose()
-    else:
-        lines = [l for l in txt.splitlines() if not l.startswith("📰")]
-        txt = "\n".join(lines)
-        soup = BeautifulSoup(txt, "html.parser")
 
+    # 4) 최종 본문 조립
     body = hidden + img_tag + str(soup)
 
     payload = {
