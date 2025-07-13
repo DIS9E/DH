@@ -20,8 +20,14 @@ SEEN_FILE = "seen_urls.json"
 def load_seen_urls():
     if os.path.exists(SEEN_FILE):
         with open(SEEN_FILE, "r", encoding="utf-8") as f:
-            return set(json.load(f))
-    return set()
+            try:
+                return set(json.load(f))
+            except json.JSONDecodeError:
+                return set()
+    else:
+        with open(SEEN_FILE, "w", encoding="utf-8") as f:
+            json.dump([], f)
+        return set()
 
 def save_seen_urls(urls):
     with open(SEEN_FILE, "w", encoding="utf-8") as f:
