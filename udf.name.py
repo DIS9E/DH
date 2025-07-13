@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-udf.name.py – v3.5-style
-• WP↔seen 자동 동기화 • no-media • dup-safe • Yoast 3필드 • 헤드라이트 톤
+udf.name.py – v3.5-style (fix-4)
+• WP↔seen 동기화 • no-media • dup-safe
+• 헤드라이트 톤 + Yoast 3필드
+• 헤더 강제 · 이미지 정확 · 태그 정규화 · 타임아웃 처리
 """
 
 import os, sys, re, json, time, logging
 from urllib.parse import urljoin, urlparse, urlunparse
-import requests
+import requests, openai
 from bs4 import BeautifulSoup
 
 # ─────── 환경
@@ -15,6 +17,7 @@ WP_URL   = os.getenv("WP_URL", "https://belatri.info").rstrip("/")
 USER     = os.getenv("WP_USERNAME")
 APP_PW   = os.getenv("WP_APP_PASSWORD")
 OPEN_KEY = os.getenv("OPENAI_API_KEY")
+openai.api_key = OPEN_KEY
 if not all([USER, APP_PW, OPEN_KEY]):
     sys.exit("❌  WP_USERNAME / WP_APP_PASSWORD / OPENAI_API_KEY 누락")
 
@@ -22,45 +25,49 @@ POSTS = f"{WP_URL}/wp-json/wp/v2/posts"
 TAGS  = f"{WP_URL}/wp-json/wp/v2/tags"
 
 UDF_BASE   = "https://udf.name/news/"
-HEADERS    = {"User-Agent": "UDFCrawler/3.5-style"}
+HEADERS    = {"User-Agent": "UDFCrawler/3.5-fix4"}
 SEEN_FILE  = "seen_urls.json"
 TARGET_CAT_ID = 20            # ‘벨라루스 뉴스’ 고정 카테고리
 
 norm = lambda u: urlunparse(urlparse(u)._replace(query="", params="", fragment=""))
 
-# ─────── seen 파일 로드·저장
-def load_seen() -> set[str]:
+# ─────── seen 파일
+def load_seen():
     if os.path.exists(SEEN_FILE):
         with open(SEEN_FILE, encoding="utf-8") as f:
             return set(json.load(f))
     return set()
 
-def save_seen(s: set[str]):
+def save_seen(s):
     with open(SEEN_FILE, "w", encoding="utf-8") as f:
         json.dump(list(s), f, ensure_ascii=False, indent=2)
 
-# ─────── WP에 글이 남아 있는지 검사
-def wp_exists(url_norm: str) -> bool:
+# ─────── WP 존재 확인
+def wp_exists(url_norm):
     r = requests.get(POSTS, params={"search": url_norm, "per_page": 1},
                      auth=(USER, APP_PW), timeout=10)
     return r.ok and bool(r.json())
 
-# ─────── **동기화**: WP에 없는 URL은 seen에서 제거
-def sync_seen(seen: set[str]) -> set[str]:
+def sync_seen(seen):
     synced = {u for u in seen if wp_exists(norm(u))}
     if len(synced) != len(seen):
         save_seen(synced)
     return synced
 
-# ─────── 기사 링크 수집
+# ─────── 링크 수집
 def fetch_links():
-    soup = BeautifulSoup(requests.get(UDF_BASE, headers=HEADERS, timeout=10).text, "html.parser")
+    soup = BeautifulSoup(requests.get(UDF_BASE, headers=HEADERS, timeout=15).text,
+                         "html.parser")
     return list({norm(urljoin(UDF_BASE, a["href"]))
                  for a in soup.select("div.article1 div.article_title_news a[href]")})
 
 # ─────── 기사 파싱
 def parse(url):
-    r = requests.get(url, headers=HEADERS, timeout=10)
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=25)
+    except requests.exceptions.ReadTimeout:
+        print("  ⚠️  타임아웃:", url)
+        return None
     if not r.ok:
         return None
     s = BeautifulSoup(r.text, "html.parser")
@@ -68,14 +75,15 @@ def parse(url):
     body  = s.find("div", id="zooming")
     if not (title and body):
         return None
-    img = s.find("img", class_="lazy") or s.find("img")
-    img_url = urljoin(url, img.get("data-src") or img.get("src")) if img else None
+    # 본문 영역 안 첫 번째 이미지
+    img_tag = body.select_one("img[src]")
+    img_url = urljoin(url, img_tag["src"]) if img_tag else None
     return {"title": title.get_text(strip=True),
             "html": str(body),
             "image": img_url,
             "url": url}
 
-# ─────── 스타일 가이드 & GPT 프롬프트
+# ─────── GPT 재작성
 STYLE_GUIDE = """
 • 톤: 친근한 존댓말, 질문·감탄 사용
 • 구조
@@ -86,28 +94,20 @@ STYLE_GUIDE = """
     ‣ 소제목2: …
   🔦 헤드라이트's 코멘트 (300자 내외)
   🏷️ 태그: 명사 3~6개
-• 마크다운 #, ##, ### 사용 금지
+• 마크다운 #, ##, ### 헤더 **반드시 포함**
 • 사실 누락·요약 금지, 길이는 원문 대비 90±10 %
 """
 
-def rewrite(a):
-    prompt = f"""{STYLE_GUIDE}
+def openai_chat(prompt):
+    resp = openai.ChatCompletion.create(
+        model="gpt-4o",
+        messages=[{"role":"user","content":prompt}],
+        temperature=0.2,
+        max_tokens=2048
+    )
+    return resp.choices[0].message.content
 
-아래 원문을 규칙에 맞춰 재작성하세요.
-
-◆ 원문
-{a['html']}
-"""
-    out = requests.post("https://api.openai.com/v1/chat/completions",
-        headers={"Authorization": f"Bearer {OPEN_KEY}",
-                 "Content-Type": "application/json"},
-        json={"model":"gpt-4o",
-              "messages":[{"role":"user","content":prompt}],
-              "temperature":0.4}, timeout=90)
-    out.raise_for_status()
-    text = out.json()["choices"][0]["message"]["content"]
-
-    # 헤더 기호 제거 + 이모지 치환
+def postprocess(text):
     fixed = []
     for line in text.splitlines():
         if line.startswith("###"):
@@ -120,6 +120,14 @@ def rewrite(a):
             fixed.append(line)
     return "\n".join(fixed)
 
+def rewrite(a, retry=2):
+    prompt = f"{STYLE_GUIDE}\n\n◆ 원문\n{a['html']}"
+    for _ in range(retry+1):
+        out = openai_chat(prompt)
+        if any(h in out for h in ("###", "##", "#")):
+            return postprocess(out)
+    raise RuntimeError("헤더 없는 출력")
+
 # ─────── 태그
 STOP = {"벨라루스", "뉴스", "기사"}
 def tag_names(txt):
@@ -128,7 +136,7 @@ def tag_names(txt):
         return []
     out = []
     for t in re.split(r"[,\s]+", m.group(1)):
-        t = t.strip("–-#")
+        t = re.sub(r"[^가-힣a-zA-Z0-9]", "", t)  # 불용문자 제거
         if 1 < len(t) <= 20 and t not in STOP and t not in out:
             out.append(t)
         if len(out) == 6:
@@ -169,27 +177,29 @@ def publish(a, txt, tag_ids):
         }
     }
     r = requests.post(POSTS, json=payload, auth=(USER, APP_PW), timeout=30)
-    print("  ↳ 게시", r.status_code, r.json().get("id"))
+    logging.info("  ↳ 게시 %s %s", r.status_code, r.json().get("id"))
     r.raise_for_status()
 
 # ─────── 메인
 def main():
-    logging.basicConfig(level=logging.WARNING)
-    seen = sync_seen(load_seen())          # ★ WP와 동기화
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s │ %(levelname)s │ %(message)s",
+                        datefmt="%Y-%m-%d %H:%M:%S")
+    seen = sync_seen(load_seen())
     links = fetch_links()
 
     todo = [u for u in links if norm(u) not in seen and not wp_exists(norm(u))]
-    print(f"📰 새 기사 {len(todo)} / 총 {len(links)}")
+    logging.info("📰 새 기사 %d / 총 %d", len(todo), len(links))
 
     for url in todo:
-        print("===", url)
+        logging.info("▶ %s", url)
         art = parse(url)
         if not art:
             continue
         try:
             txt = rewrite(art)
         except Exception as e:
-            print("  GPT 오류:", e)
+            logging.warning("  GPT 오류: %s", e)
             continue
 
         tag_ids = [tid for n in tag_names(txt) if (tid := tag_id(n))]
@@ -197,7 +207,7 @@ def main():
             publish(art, txt, tag_ids)
             seen.add(norm(url)); save_seen(seen)
         except Exception as e:
-            print("  업로드 실패:", e)
+            logging.error("  업로드 실패: %s", e)
         time.sleep(2)
 
 if __name__ == "__main__":
