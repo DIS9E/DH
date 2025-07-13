@@ -2,7 +2,7 @@ import requests
 import json
 import os
 from bs4 import BeautifulSoup, NavigableString, Tag
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 from requests.auth import HTTPBasicAuth
 
 # ✅ 환경변수 불러오기
@@ -16,18 +16,17 @@ UDF_BASE_URL = "https://udf.name/news/"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 SEEN_FILE = "seen_urls.json"
 
+# ✅ URL 정규화 함수 (쿼리 파라미터 제거)
+def normalize_url(url):
+    parsed = urlparse(url)
+    return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+
 # ✅ 이전 URL 불러오기
 def load_seen_urls():
     if os.path.exists(SEEN_FILE):
         with open(SEEN_FILE, "r", encoding="utf-8") as f:
-            try:
-                return set(json.load(f))
-            except json.JSONDecodeError:
-                return set()
-    else:
-        with open(SEEN_FILE, "w", encoding="utf-8") as f:
-            json.dump([], f)
-        return set()
+            return set(json.load(f))
+    return set()
 
 def save_seen_urls(urls):
     with open(SEEN_FILE, "w", encoding="utf-8") as f:
@@ -49,7 +48,7 @@ def get_article_links():
             href.endswith(".html") and
             href.count("/") >= 5
         ):
-            links.append(href)
+            links.append(normalize_url(href))
     return list(set(links))
 
 # ✅ 기사 내용 추출
@@ -209,7 +208,7 @@ if __name__ == "__main__":
     print("🔍 크롤링 시작")
     seen = load_seen_urls()
     all_links = get_article_links()
-    new_links = [link for link in all_links if link not in seen]
+    new_links = [link for link in all_links if normalize_url(link) not in seen]
     print(f"📰 새 기사 수: {len(new_links)}")
 
     for url in new_links:
@@ -232,9 +231,9 @@ if __name__ == "__main__":
 
         if success:
             print(f"✅ 업로드 성공: {title_clean}")
-            seen.add(url)
+            seen.add(normalize_url(url))  # ✅ 정규화 후 저장
+            save_seen_urls(seen)         # ✅ 바로 저장
         else:
             print(f"❌ 업로드 실패: {title_clean}")
 
-    save_seen_urls(seen)
-    print("✅ 작업 완료")
+    print("✅ 전체 작업 완료")
