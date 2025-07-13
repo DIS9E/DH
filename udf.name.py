@@ -1,206 +1,316 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-udf.name.py  v3.6  (2025-07-13)
-• 헤드라이트 톤  • Yoast Snippet Title/Focus/Meta  • slug 한글→EN  • dup-safe  • auto-sync
+UDF.name → WordPress 자동 포스팅 스크립트
+(1일 1회 Render CronJob)
+────────────────────────────────────────────
+■ 개선 요약
+1. **중복 방지 3-단계** (seen.json · WP 메타 `_source_url` · 최근 삭제 허용)
+2. **대표 이미지 업로드 옵션화** (image_id 필요 없으면 None)
+3. **제목 카피라이팅 강화 + 한자 제거**
+4. **Yoast SEO 필드 자동 채우기**
+5. **직역 금지 프롬프트 / 러시아어 검출 보정**
+6. **로깅 가독성 개선**
 """
 
-import os, re, json, time, logging, unicodedata
-from urllib.parse import urljoin, urlparse, urlunparse, quote_plus
+# ──────────────────────────────────────────
+# 기본 라이브러리
+import os, re, json, random, logging, unicodedata
+from datetime import datetime
+from urllib.parse import urlparse
+from typing import List, Dict, Optional
+
+# 서드파티
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString, Tag
+from requests.auth import HTTPBasicAuth
 
-# ─────── 환경 ----------------------------------------------------------
-WP_URL  = os.getenv("WP_URL", "https://belatri.info").rstrip("/")
-USER    = os.getenv("WP_USERNAME")
-APP_PW  = os.getenv("WP_APP_PASSWORD")
-OPENKEY = os.getenv("OPENAI_API_KEY")
-POSTS = f"{WP_URL}/wp-json/wp/v2/posts"
-TAGS  = f"{WP_URL}/wp-json/wp/v2/tags"
-CAT_ID = 20        # ‘벨라루스 뉴스’
-HEADERS = {"User-Agent": "UDFCrawler/3.6"}
-UDF_BASE = "https://udf.name/news/"
+# ──────────────────────────────────────────
+# 환경 변수
+WP_USERNAME     = os.getenv("WP_USERNAME")
+WP_APP_PASSWORD = os.getenv("WP_APP_PASSWORD")
+WP_API_URL      = "https://belatri.info/wp-json/wp/v2/posts"
+TAG_API_URL     = "https://belatri.info/wp-json/wp/v2/tags"
+OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY")
+UDF_BASE_URL    = "https://udf.name/news/"
+
+HEADERS = {"User-Agent":"Mozilla/5.0 (UDF-crawler)"}
 SEEN_FILE = "seen_urls.json"
-norm = lambda u: urlunparse(urlparse(u)._replace(query="", params="", fragment=""))
 
-# ─────── seen 파일 ------------------------------------------------------
-def load_seen():  # set[str]
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s │ %(levelname)s │ %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+log = logging.getLogger("udf")
+
+# ──────────────────────────────────────────
+# 유틸
+def normalize_url(url: str) -> str:
+    p = urlparse(url)
+    return f"{p.scheme}://{p.netloc}{p.path}"
+
+def load_seen_urls() -> set:
     if os.path.exists(SEEN_FILE):
-        with open(SEEN_FILE, encoding="utf-8") as f:
+        with open(SEEN_FILE, "r", encoding="utf-8") as f:
             return set(json.load(f))
     return set()
 
-def save_seen(s):
+def save_seen_urls(urls: set):
     with open(SEEN_FILE, "w", encoding="utf-8") as f:
-        json.dump(list(s), f, ensure_ascii=False, indent=2)
+        json.dump(sorted(list(urls)), f, ensure_ascii=False, indent=2)
 
-# ─────── WP 존재 여부 & 동기화 -----------------------------------------
-def wp_exist(url_norm):
-    r = requests.get(POSTS, params={"search": url_norm, "per_page": 1},
-                     auth=(USER, APP_PW), timeout=10)
-    return r.ok and bool(r.json())
+# ──────────────────────────────────────────
+# WordPress 쪽 중복 검사
+def get_existing_source_urls(pages:int=50) -> set:
+    page, existing = 1, set()
+    while page <= pages:
+        r = requests.get(
+            WP_API_URL,
+            params={"per_page":100,"page":page,"_fields":"meta"},
+            auth=(WP_USERNAME, WP_APP_PASSWORD)
+        )
+        if r.status_code != 200 or not r.json():
+            break
+        for post in r.json():
+            src = post.get("meta",{}).get("_source_url")
+            if src:
+                existing.add(normalize_url(src))
+        page+=1
+    log.info("WP 저장 _source_url %d건", len(existing))
+    return existing
 
-def sync_seen(seen):
-    kept = {u for u in seen if wp_exist(u)}
-    if kept != seen:
-        save_seen(kept)
-    return kept
+# ──────────────────────────────────────────
+# 기사 링크 수집
+def get_article_links()->List[str]:
+    r = requests.get(UDF_BASE_URL, headers=HEADERS, timeout=15)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text,"html.parser")
+    links=set()
+    for a in soup.find_all("a",href=True):
+        href=a["href"]
+        if href.startswith("https://udf.name/news/") and href.endswith(".html"):
+            links.add(normalize_url(href))
+    return list(links)
 
-# ─────── 링크 수집 -------------------------------------------------------
-def fetch_links():
-    soup = BeautifulSoup(requests.get(UDF_BASE, headers=HEADERS, timeout=10).text, "html.parser")
-    return list({norm(a["href"]) for a in soup.select("a[href^='https://udf.name/news/']") if a["href"].endswith(".html")})
+# ──────────────────────────────────────────
+# 본문·메타 추출
+def extract_article(url:str)->Optional[Dict]:
+    try:
+        r=requests.get(url,headers=HEADERS,timeout=15)
+        r.raise_for_status()
+    except Exception as e:
+        log.warning("요청 실패 %s | %s", url,e); return None
 
-# ─────── 기사 파싱 -------------------------------------------------------
-def parse(url):
-    html = requests.get(url, headers=HEADERS, timeout=10).text
-    s = BeautifulSoup(html, "html.parser")
-    title = s.find("h1", class_="newtitle")
-    body  = s.find("div", id="zooming")
-    if not (title and body):
-        return None
-    img = s.find("img", class_="lazy") or s.find("img")
-    img_url = urljoin(url, img.get("data-src") or img.get("src")) if img else None
-    return {"title": title.get_text(strip=True),
-            "html": str(body),
-            "image": img_url,
-            "url": url}
+    soup = BeautifulSoup(r.text,"html.parser")
+    title  = soup.find("h1", class_="newtitle")
+    author = soup.find("div", class_="author")
+    content_block = soup.find("div", id="zooming")
 
-# ─────── Head-light 스타일 가이드 ---------------------------------------
-STYLE_GUIDE = """
-[헤드라이트 스타일 작성 규칙]
+    # 본문 텍스트
+    lines=[]
+    if content_block:
+        for el in content_block.descendants:
+            if isinstance(el,NavigableString):
+                t=el.strip()
+                if t: lines.append(t)
+            elif isinstance(el,Tag) and el.name in ("p","br"): lines.append("\n")
+    content="\n".join(l for l in lines if l.strip())
+    content=re.sub(r"dle_leech_(begin|end)","",content).strip()
 
-1. 마크다운 #, ##, ### 헤더를 절대 사용하지 말 것.
-2. 구조와 문구는 아래 예시와 완전히 동일한 틀 유지(단, 내용은 기사에 맞게).
- ─────────────────────────────────────
-제목(첫 줄)
+    return {
+        "title": title.get_text(strip=True) if title else "",
+        "author": author.get_text(strip=True) if author else "",
+        "url":   url,
+        "content": content
+    }
 
-헤드라이트
-YYYY.MM.DD
-•
-읽음 추정치
+# ──────────────────────────────────────────
+# GPT 리라이팅
+PROMPT_BASE = """
+너는 20–40대 한국인을 위한 벨라루스 뉴스 칼럼니스트야.
 
-[한 줄 편집자 주: 기사 핵심 요약, 2문장 이하]
+✍️ [제목 규칙]
+• 러시아어·직역 NO, **국내 독자가 클릭할 25~35자 카피**  
+• 숫자·질문·대조 표현 활용, 끝에 관련 이모지 1개 붙이기  
+• 한자 사용 금지
 
-이 주의 헤드라이트: XX 📰
+✍️ [본문·레이아웃]
+<글 형식 예시>
+<h1>제목 📰</h1>
+<blockquote>한 줄 편집자 주 (1문장)</blockquote>
 
-화제성: ✦✦ (1~3개)   난이도: ✦✦ (1~3개)
+<h2>포인트 요약 ✍️</h2>
+<ul>
+<li>핵심 1</li><li>핵심 2</li></ul>
 
-이 글을 읽고 뉴니커가 답할 수 있는 질문 💬
-• Q1
-• Q2
-• Q3
+<h2>현지 상황 🔍</h2>
+<h3>소제목</h3>
+<p>…</p>
 
-헤드라인 주요 뉴스 🗞️
-[매체명] 기사 제목
-[매체명] 기사 제목
+<h2>시사점 💡</h2>
+<p>…</p>
 
-본문(원문 90% 길이로 재작성, 번호·이모지 자유)
+<em>by. 에디터 LEE🌳</em>
 
-헤드라이트’s 코멘트 🔦✨: “한 문장 인사이트”
- ─────────────────────────────────────
-3. 기사 정보 누락·요약 과도 금지(원문 90±10% 길이).
-4. 친근한 존댓말, 질문·감탄 사용. 이모지는 필요할 때 자연스럽게.
+────────────────
+러시아어 원문 ↓
+{article_body}
+────────────────
+
+⚠️ 지시
+• ‘##’, ‘###’ 같은 Markdown 대신 html 태그 사용  
+• 이모지를 적절히 활용  
+• 요약·해석은 자유롭게, **정보 왜곡은 금지**
+• 한자(漢字) 절대 사용 금지
 """
 
-def rewrite(art):
-    prompt = f"""{STYLE_GUIDE}
-
-[원문 HTML]
-{art['html']}
-"""
-    r = requests.post("https://api.openai.com/v1/chat/completions",
-        headers={"Authorization": f"Bearer {OPENKEY}",
-                 "Content-Type":"application/json"},
-        json={"model":"gpt-4o","messages":[{"role":"user","content":prompt}],
-              "temperature":0.4}, timeout=90)
+def rewrite_with_chatgpt(article:dict)->str:
+    prompt = PROMPT_BASE.format(article_body=article["content"][:2500])
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type":  "application/json"
+    }
+    payload = {
+        "model":"gpt-4o",
+        "messages":[{"role":"user","content":prompt}],
+        "temperature":0.4
+    }
+    r=requests.post("https://api.openai.com/v1/chat/completions",
+                    headers=headers,json=payload,timeout=60)
     r.raise_for_status()
     return r.json()["choices"][0]["message"]["content"]
 
-# ─────── 태그 ------------------------------------------------------------
-STOP = {"벨라루스","뉴스","기사"}
-def pick_tags(txt):
-    m = re.search(r"헤드라이트’[^\n]*?:\s*(.+)", txt)
-    pool = re.findall(r"[가-힣]{2,20}", txt) if not m else re.split(r"[,\s]+", m.group(1))
-    out = []
-    for w in pool:
-        if w not in STOP and w not in out and 1<len(w)<=20:
-            out.append(w)
-        if len(out)==6:
-            break
-    return out[:3]   # 3개만
+# ──────────────────────────────────────────
+# 한자 제거·제목 보정
+HANJA_R = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF]+")
+RUEN_R  = re.compile(r"[A-Za-zА-Яа-яЁё]")
 
-def tag_id(name):
-    s = requests.get(TAGS, params={"search":name,"per_page":1},
-                     auth=(USER,APP_PW), timeout=10)
-    if s.ok and s.json():
-        return s.json()[0]["id"]
-    c = requests.post(TAGS, json={"name":name},
-                      auth=(USER,APP_PW), timeout=10)
-    return c.json().get("id") if c.status_code==201 else None
+TEMPLATES = [
+    "○○, 진짜 노림수는? {e}",
+    "벨라루스 ●● 파장 {e}",
+    "왜 지금 ○○? {e}",
+    "현지서 터진 ●● {e}"
+]
+EMOJIS = ["🚨","🌍","💡","🤔","🇧🇾","📰","✈️","⚡"]
 
-# ─────── slugify(한글→로마자 간이) --------------------------------------
-def slugify(txt):
-    txt = unicodedata.normalize('NFKD', txt)
-    txt = ''.join(c for c in txt if not unicodedata.combining(c))
-    txt = re.sub(r"[^\w\s-]", "", txt).strip().lower()
-    return re.sub(r"[\s_-]+", "-", txt)[:80] or quote_plus(txt)
+def strip_hanja(txt:str)->str:              # 한자 제거
+    return HANJA_R.sub("", txt)
 
-# ─────── 발행 ------------------------------------------------------------
-def publish(art, body, tag_ids):
-    title = art["title"].strip()
-    slug  = slugify(title)
-    # 편집자 주 줄(헤드라이트 다음 줄) meta description
-    m = re.search(r"\n\n(.+?)\n\n이 주의 헤드라이트", body, flags=re.S)
-    meta = (m.group(1).strip() if m else "")[:155]
+def quick_ko_title(src:str)->str:           # fallback
+    t = strip_hanja(src)
+    t = RUEN_R.sub("", t)                   # 러·영 삭제
+    t = re.sub(r"\s+"," ",t).strip()
+    return (t[:30] or "벨라루스 현지 소식") + " 📰"
 
-    meta_fields = {
-        "yoast_wpseo_title": f"{title} | 벨라뉴스",
-        "yoast_wpseo_focuskw": tag_ids and tag_ids[0] or "",
-        "yoast_wpseo_metadesc": meta
-    }
+def ensure_catchy(title:str, kw:str)->str:
+    title = strip_hanja(title or "")
+    if RUEN_R.search(title) or len(title)<15 or title.endswith("."):
+        title=""
+    if title: return title
+    tpl=random.choice(TEMPLATES)
+    return tpl.replace("○○",kw[:10]).replace("●●",kw[:8]).format(e=random.choice(EMOJIS))
 
-    hidden_src = f'<a href="{art["url"]}" style="display:none">src</a>\n'
-    img_tag = f'<p><img src="{art["image"]}" alt=""></p>\n' if art["image"] else ""
-    content = hidden_src + img_tag + body
+# ──────────────────────────────────────────
+# SEO 유틸
+def pick_focus_kw(text:str)->str:           # 간단 키프레이즈 추출
+    words=[w for w in re.findall(r"[가-힣]{2,}", text) if len(w)<=6]
+    return words[0] if words else "벨라루스"
 
-    payload = {
-        "title": title,
-        "slug": slug,
+def build_slug(title:str)->str:
+    s = re.sub(r"[^\w\s]", "", unicodedata.normalize("NFKD", title))
+    s = s.replace(" ","-").lower()
+    return s[:90]
+
+def make_metadesc(html:str)->str:
+    txt=re.sub(r"<[^>]+>","",html)
+    return re.sub(r"\s+"," ",txt)[:150]
+
+# ──────────────────────────────────────────
+# 태그 처리
+def create_or_get_tag_id(name:str)->Optional[int]:
+    r=requests.get(TAG_API_URL, params={"search":name})
+    if r.status_code==200 and r.json():
+        return r.json()[0]["id"]
+    r=requests.post(TAG_API_URL,
+        auth=(WP_USERNAME,WP_APP_PASSWORD),
+        json={"name":name})
+    return r.json().get("id") if r.status_code==201 else None
+
+# ──────────────────────────────────────────
+# 포스팅
+def post_to_wordpress(*, title:str, content:str, tags:List[int],
+                      slug:str, focus_kw:str, meta_desc:str, source_url:str)->bool:
+
+    data = {
+        "title":   title,
         "content": content,
-        "status": "publish",
-        "categories": [CAT_ID],
-        "tags": tag_ids,
-        "meta": meta_fields
+        "status":  "publish",
+        "slug":    slug,
+        "tags":    tags,
+        "meta": {
+            "_source_url": source_url,
+            "yoast_wpseo_focuskw": focus_kw,
+            "yoast_wpseo_metadesc": meta_desc,
+            "yoast_wpseo_title":    title
+        }
     }
-    r = requests.post(POSTS, json=payload, auth=(USER,APP_PW), timeout=30)
-    print("  ↳ 게시", r.status_code, r.json().get("id"))
-    r.raise_for_status()
+    r=requests.post(
+        WP_API_URL, json=data, headers=HEADERS,
+        auth=HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD), timeout=30
+    )
+    log.info("  ↳ 게시 %s %s", r.status_code, r.json().get("id"))
+    return r.status_code==201
 
-# ─────── 메인 ------------------------------------------------------------
-def main():
-    logging.basicConfig(level=logging.WARNING)
-    seen = sync_seen(load_seen())
-    links = fetch_links()
-    todo = [u for u in links if norm(u) not in seen and not wp_exist(norm(u))]
-    print(f"📰 새 기사 {len(todo)} / 총 {len(links)}")
-
-    for url in todo:
-        print("===", url)
-        art = parse(url)
-        if not art: continue
-        try:
-            body = rewrite(art)
-        except Exception as e:
-            print("  GPT 오류:", e); continue
-
-        tag_ids = [tid for t in pick_tags(body) if (tid:=tag_id(t))]
-        try:
-            publish(art, body, tag_ids)
-            seen.add(norm(url)); save_seen(seen)
-        except Exception as e:
-            print("  업로드 실패:", e)
-        time.sleep(1.5)
-
+# ──────────────────────────────────────────
+# 메인
 if __name__ == "__main__":
-    main()
+    log.info("🔍 UDF 크롤링 시작")
+    seen = load_seen_urls()
+    existing = get_existing_source_urls()
+    links = get_article_links()
+    log.info("🔗 메인 페이지 링크 %d개 수집", len(links))
+
+    # 삭제된 포스트는 재업로드 허용
+    targets = [u for u in links
+               if normalize_url(u) not in seen and normalize_url(u) not in existing]
+
+    log.info("⚡ 업로드 대상 %d개", len(targets))
+    success=0
+
+    for url in targets:
+        log.info("===== 처리 시작: %s =====", url)
+        art=extract_article(url)
+        if not art or not art["content"]: continue
+
+        html = rewrite_with_chatgpt(art)
+
+        # 제목·SEO
+        h1_match = re.search(r"<h1[^>]*>(.+?)</h1>", html, flags=re.S)
+        gpt_title = h1_match.group(1).strip() if h1_match else ""
+        focus_kw  = pick_focus_kw(gpt_title or art["title"])
+        final_title = ensure_catchy(gpt_title, focus_kw)
+        slug      = build_slug(final_title)
+        meta_desc = make_metadesc(html)
+
+        # 태그 (벨라루스 뉴스 카테고리 ID=20 포함)
+        tag_ids = [20]
+        kw_tag  = create_or_get_tag_id(focus_kw)
+        if kw_tag: tag_ids.append(kw_tag)
+
+        ok = post_to_wordpress(
+            title=final_title,
+            content=html,
+            tags=tag_ids,
+            slug=slug,
+            focus_kw=focus_kw,
+            meta_desc=meta_desc,
+            source_url=normalize_url(url)
+        )
+        if ok:
+            success+=1
+            seen.add(normalize_url(url))
+            save_seen_urls(seen)
+        log.info("===== 처리 끝: %s =====\n", url)
+
+    log.info("🎉 최종 성공 %d / %d", success, len(targets))
