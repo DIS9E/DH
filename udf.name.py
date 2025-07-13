@@ -64,17 +64,30 @@ def parse(url: str):
     r = requests.get(url, headers=HEADERS, timeout=10)
     if not r.ok:
         return None
+
     s = BeautifulSoup(r.text, "html.parser")
-    title = s.find("h1", class_="newtitle")
-    body  = s.find("div", id="zooming")
-    if not (title and body):
+    title_tag = s.find("h1", class_="newtitle")
+    body_tag  = s.find("div", id="zooming")
+    if not (title_tag and body_tag):
         return None
+
+    # ── (추가) 본문에 원제목 헤더가 있으면 삭제 ──
+    title_txt = title_tag.get_text(strip=True)
+    for h in body_tag.find_all(["h1", "h2", "h3"]):
+        if title_txt in h.get_text(strip=True):
+            h.decompose()
+            break
+
+    # 이미지
     img = s.find("img", class_="lazy") or s.find("img")
     img_url = urljoin(url, img.get("data-src") or img.get("src")) if img else None
-    return {"title": title.get_text(strip=True),
-            "html": str(body),
-            "image": img_url,
-            "url": url}
+
+    return {
+        "title": title_txt,          # 문자열
+        "html": str(body_tag),       # HTML 문자열
+        "image": img_url,            # 문자열 또는 None
+        "url": url                   # 원본 URL
+    }
 
 # ────────── 작성 가이드 & 프롬프트 ──────────
 STYLE_GUIDE = """
