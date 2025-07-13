@@ -130,31 +130,46 @@ def tag_id(name):
     c=requests.post(TAGS_API, json={"name":name}, auth=(USER,APP_PW), timeout=10)
     return c.json()["id"] if c.status_code==201 else None
 
-# ── 게시 ──
-def publish(article, txt, tag_ids):
-    hidden=f'<a href="{article["url"]}" style="display:none">src</a>\n'
-    img_tag=f'<p><img src="{article["image"]}" alt=""></p>\n' if article["image"] else ""
+# ────────── 게시 ──────────
+def publish(article: dict, txt: str, tag_ids: list[int]):
+    hidden  = f'<a href="{article["url"]}" style="display:none">src</a>\n'
+    img_tag = f'<p><img src="{article["image"]}" alt=""></p>\n' if article["image"] else ""
 
-    # 1) 코드블록( ``` ) · 📰 줄 · '소제목 1/2' 삭제
-    txt_no_code=re.sub(r"```[\s\S]*?```","",txt)
-    clean_lines=[l for l in txt_no_code.splitlines()
-                 if not (l.strip().startswith("📰") or l.strip().startswith("소제목"))]
-    soup=BeautifulSoup("\n".join(clean_lines),"html.parser")
+    # 1) 코드블록 울타리(``` 라인)와 📰 -라인, ‘소제목 1/2’ 플레이스홀더 제거
+    import re
+    lines = []
+    for l in txt.splitlines():
+        stripped = l.strip()
+        if stripped.startswith("```"):             # 울타리 라인만 스킵, 내용은 유지
+            continue
+        if stripped.startswith("📰") or stripped.startswith("소제목"):
+            continue
+        lines.append(l)
+    txt_clean = "\n".join(lines)
 
-    # 2) 제목 변환
-    h1=soup.find("h1")
-    orig_title=h1.get_text(strip=True) if h1 else article["title"]
-    context_txt=soup.get_text(" ",strip=True)
-    title=korean_title(orig_title, context_txt)
+    # 2) HTML 파싱
+    soup = BeautifulSoup(txt_clean, "html.parser")
 
-    # 3) 본문에서 h1 삭제 (중복 방지)
-    if h1: h1.decompose()
+    # 3) 포스트 제목 결정 → 러시아어라면 한국어+맞춤 이모지 변환
+    h1_tag = soup.find("h1")
+    orig_title = h1_tag.get_text(strip=True) if h1_tag else article["title"]
+    context_txt = soup.get_text(" ", strip=True)
+    title = korean_title(orig_title, context_txt)
 
-    body=hidden+img_tag+str(soup)
+    # 4) 본문에 남은 <h1> 제거(중복 방지)
+    if h1_tag:
+        h1_tag.decompose()
 
-    payload={"title":title,"content":body,"status":"publish",
-             "categories":[TARGET_CAT_ID],"tags":tag_ids}
-    r=requests.post(POSTS_API,json=payload,auth=(USER,APP_PW),timeout=30)
+    body = hidden + img_tag + str(soup)
+
+    payload = {
+        "title": title,
+        "content": body,
+        "status": "publish",
+        "categories": [TARGET_CAT_ID],
+        "tags": tag_ids,
+    }
+    r = requests.post(POSTS_API, json=payload, auth=(USER, APP_PW), timeout=30)
     logging.info("  ↳ 게시 %s %s", r.status_code, r.json().get("id"))
     r.raise_for_status()
 
