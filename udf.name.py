@@ -84,8 +84,10 @@ STYLE_GUIDE = textwrap.dedent("""
 <h1>(이모지 1–3개) 흥미로운 한국어 제목</h1>
 <small>뉴닉 • {date} • 읽음 {views:,}</small>
 <h2>✍️ 편집자 주 — 기사 핵심 2문장</h2>
-<h3>📊 최신 데이터</h3><p>(extra_context)</p>
-<h3>💬 전문가 전망</h3><p>(500자↑)</p>
+<h3>📊 최신 데이터</h3><p><ul>
+  <li>환율·유가·헤드라인 등 최소 4~6줄</li>
+</ul></p>
+<h3>💬 전문가 전망</h3><p>근거·숫자 포함 분석 2문단(500자↑)</p>
 <h3>❓ Q&A</h3>
 <ul><li><strong>Q1.</strong> …?<br><strong>A.</strong> …</li>
 <li><strong>Q2.</strong> …?<br><strong>A.</strong> …</li>
