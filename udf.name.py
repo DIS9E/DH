@@ -82,7 +82,7 @@ def parse(url):
 # ── STYLE_GUIDE (⟪META⟫, ⟪RAW_HTML⟫ 플레이스홀더 사용) ────────
 STYLE_GUIDE = textwrap.dedent("""
 <h1>(이모지 1–3개) 흥미로운 한국어 제목</h1>
-<small>뉴닉 • {date} • 읽음 {views:,}</small>
+
 <h2>✍️ 편집자 주 — 기사 핵심 2문장</h2>
 <h3>📊 최신 데이터</h3><p><ul>
   <li>환율·유가·헤드라인 등 최소 4~6줄</li>
