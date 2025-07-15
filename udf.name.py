@@ -11,6 +11,7 @@ import os, sys, re, json, time, logging
 from urllib.parse import urljoin, urlparse, urlunparse
 import requests
 from bs4 import BeautifulSoup
+import textwrap
 
 # ────────── 환경 변수 ──────────
 WP_URL   = os.getenv("WP_URL", "https://belatri.info").rstrip("/")
