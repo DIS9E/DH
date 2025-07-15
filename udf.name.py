@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-udf.name.py – v3.9-debug3
-• 롱폼(섹션당 500자↑) + 외부 데이터 주입
-• 제목 중복 제거, 이미지 캡션
-• 워드프레스 핑백(자동 댓글) 완전 차단
-• DEBUG 로그 출력
+udf.name.py – v3.9-stable
+• 섹션별 500자↑ 확장  +  HTML 구조·이모지 보존
+• 제목 중복 완전 제거  • 워드프레스 핑백 차단
+• DEBUG 로그 기본 내장
 """
 
 import os, sys, re, json, time, logging
@@ -25,7 +24,7 @@ POSTS_API = f"{WP_URL}/wp-json/wp/v2/posts"
 TAGS_API  = f"{WP_URL}/wp-json/wp/v2/tags"
 
 UDF_BASE  = "https://udf.name/news/"
-HEADERS   = {"User-Agent": "UDFCrawler/3.9-debug3"}
+HEADERS   = {"User-Agent": "UDFCrawler/3.9-stable"}
 SEEN_FILE = "seen_urls.json"
 TARGET_CAT_ID = 20
 norm = lambda u: urlunparse(urlparse(u)._replace(query="", params="", fragment=""))
@@ -50,8 +49,8 @@ def sync_seen(seen):
 
 # ────────── 링크 크롤링 ──────────
 def fetch_links():
-    html = requests.get(UDF_BASE, headers=HEADERS, timeout=10).text
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(requests.get(UDF_BASE, headers=HEADERS, timeout=10).text,
+                         "html.parser")
     return list({norm(urljoin(UDF_BASE, a["href"]))
                  for a in soup.select("div.article1 div.article_title_news a[href]")})
 
@@ -73,7 +72,7 @@ def parse(url: str):
         if src and ("placeholder" in src or "default" in src):
             src = None
 
-    cat = url.split("/news/")[1].split("/")[0]   # economic, society, politic …
+    cat = url.split("/news/")[1].split("/")[0]
 
     return {
         "title": t.get_text(strip=True),
@@ -86,9 +85,8 @@ def parse(url: str):
 # ────────── 외부 브리프 ──────────
 def build_brief(cat: str, headline: str) -> str:
     s = []
-    # Reuters 헤드라인
     try:
-        rss = requests.get("https://www.reuters.com/rssFeed/ru/businessNews", timeout=10).text
+        rss = requests.get("https://feeds.reuters.com/worldNews", timeout=10).text
         s += [f"• Reuters: {t}" for t in re.findall(r"<title>(.*?)</title>", rss)[1:3]]
     except:
         pass
@@ -107,13 +105,6 @@ def build_brief(cat: str, headline: str) -> str:
             s.append("• BBC: " + re.search(r"<title>(.*?)</title>", bbc).group(1))
         except:
             pass
-        try:
-            eia = requests.get(
-                "https://api.eia.gov/series/?api_key=DEMO_KEY&series_id=PET.RWTC.D",
-                timeout=10).json()
-            s.append(f"• <a href='https://www.eia.gov'>WTI</a> ${eia['series'][0]['data'][0][1]}")
-        except:
-            pass
 
     s.append(f"• 헤드라인 키워드: {headline[:60]}")
     return "\n".join(s)
@@ -122,23 +113,18 @@ def build_brief(cat: str, headline: str) -> str:
 STYLE_GUIDE = """
 <h1>📰 (이모지) 흥미로운 한국어 제목</h1>
 <h2>✍️ 편집자 주 — 기사 핵심을 2문장</h2>
-
 <h3>📊 최신 데이터</h3>
 <p>(extra_context 숫자·링크 이용, <strong>500자 이상</strong>)</p>
-
 <h3>💬 전문가 전망</h3>
 <p>(시나리오·숫자·기관 인용 포함, <strong>500자 이상</strong>)</p>
-
 <h3>❓ Q&A</h3>
 <ul>
-  <li>Q1…?<br><strong>A.</strong> (2문장↑)</li>
-  <li>Q2…?<br><strong>A.</strong> (2문장↑)</li>
-  <li>Q3…?<br><strong>A.</strong> (2문장↑)</li>
+  <li>Q1…?<br><strong>A.</strong> … (2문장↑)</li>
+  <li>Q2…?<br><strong>A.</strong> … (2문장↑)</li>
+  <li>Q3…?<br><strong>A.</strong> … (2문장↑)</li>
 </ul>
-
 <h3>(본문 해설)</h3>
 <p>원문 문장 모두 자연스럽게 재배치…</p>
-
 <p>🏷️ 태그: 명사 3–6개</p>
 <p>이 기사는 벨라루스 현지 보도를 재구성한 콘텐츠입니다.<br>by. 에디터 LEE🌳</p>
 """
@@ -192,45 +178,51 @@ def tag_id(name: str):
     return c.json()["id"] if c.status_code == 201 else None
 
 # ────────── 길이·헤더 가드 ──────────
-def ensure_long(html: str, title: str) -> str:
+def ensure_long(html: str, title_kor: str, title_ru: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
-    # 제목 중복 텍스트 삭제
+
+    # 1) 제목 중복 텍스트 제거 (러시아어·한국어 둘 다)
     for t in soup.find_all(string=True):
-        if title.strip() in t.strip():
+        if any(tt.strip() == t.strip() for tt in (title_kor, title_ru)):
             t.extract()
-    # 500자 미만 블록 확장
+
+    # 2) 500자 미만 블록 확장 (태그 유지)
     for blk in soup.find_all(["p", "ul"]):
         if len(blk.get_text()) < 500:
+            original = blk.get_text()
             try:
+                expanded = chat(
+                    f"아래 <문단>을 근거·숫자·전망 포함 500자 이상으로 확장:"
+                    f"\n<문단>{original}</문단>",
+                    max_tok=250, temp=0.7, model="gpt-4o-mini")
                 blk.clear()
-                blk.append(BeautifulSoup(
-                    chat(f"문단을 근거·숫자·전망 포함 500자↑ 확장:\n{blk}",
-                         max_tok=200, temp=0.7, model="gpt-4o-mini"),
-                    "html.parser"))
+                blk.append(BeautifulSoup(expanded, "html.parser"))
             except Exception as e:
                 logging.debug("mini GPT 확장 실패: %s", e)
+
     return str(soup)
 
 # ────────── 게시 ──────────
 def publish(art, txt, tag_ids):
-    logging.debug("before guard len=%d", len(txt))
-    txt = ensure_long(txt, art["title"])
-    logging.debug("after guard len=%d", len(txt))
-
     hidden  = f'<a href="{art["url"]}" style="display:none">src</a>\n'
     img_tag = f'<p><img src="{art["image"]}" alt=""></p>\n' if art["image"] else ""
     soup = BeautifulSoup(txt, "html.parser")
 
     h1 = soup.find("h1")
-    orig = h1.get_text(strip=True) if h1 else art["title"]
-    title = korean_title(orig, soup.get_text())
+    orig_ru = art["title"]
+    orig_kor = korean_title(orig_ru, soup.get_text(" ", strip=True)) if h1 is None else h1.get_text(strip=True)
     if h1:
         h1.decompose()
-    new_h1 = soup.new_tag("h1")
-    new_h1.string = title
-    soup.insert(0, new_h1)
-    logging.debug("after header has_h1=%s", bool(soup.find("h1")))
 
+    soup_str = ensure_long(str(soup), orig_kor, orig_ru)
+    soup = BeautifulSoup(soup_str, "html.parser")
+
+    # 새 <h1>
+    new_h1 = soup.new_tag("h1")
+    new_h1.string = orig_kor
+    soup.insert(0, new_h1)
+
+    # 이미지 캡션
     if img_tag:
         img = soup.find("img")
         if img and not img.find_next_sibling("em"):
@@ -241,15 +233,14 @@ def publish(art, txt, tag_ids):
     body = hidden + img_tag + str(soup)
 
     payload = {
-        "title": title,
+        "title": orig_kor,
         "content": body,
         "status": "publish",
         "categories": [TARGET_CAT_ID],
         "tags": tag_ids,
-        "ping_status": "closed"              # 🔒 핑백(자동 댓글) 차단
+        "ping_status": "closed"   # 핑백 차단
     }
-    r = requests.post(POSTS_API, json=payload,
-                      auth=(USER, APP_PW), timeout=30)
+    r = requests.post(POSTS_API, json=payload, auth=(USER, APP_PW), timeout=30)
     logging.info("↳ 게시 %s %s", r.status_code, r.json().get("id"))
     r.raise_for_status()
 
