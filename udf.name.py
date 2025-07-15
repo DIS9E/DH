@@ -81,38 +81,19 @@ def parse(url):
 
 # ── STYLE_GUIDE (⟪META⟫, ⟪RAW_HTML⟫ 플레이스홀더 사용) ────────
 STYLE_GUIDE = textwrap.dedent("""
-
-<!-- 📰 헤드라인(이모지 1–3개 + 45자↓ 한국어 제목) -->
-<h1>📰 {{emoji_title}}</h1>
-
-<h2>✍️ 편집자 주 — 이 기사, 이렇게 읽어요</h2>
-<!-- 아래 한 단락에 기사 핵심을 ‘긴 문장’ 2개로 요약하세요 -->
-<p></p>
-
-<!-- ⟪META⟫: 환율·유가·RSS 헤드라인 등이 4–6줄 삽입됨 -->
-⟪META⟫
-
-<h2>📊 최신 데이터</h2>
-<ul>
-  <li>환율·유가·헤드라인 등 최소 4~6줄</li>
-</ul>
-
-<h2>💬 전문가 전망</h2>
-<p>근거·숫자 포함 분석 2문단(각 4문장↑)</p>
-
+<h1>(이모지 1–3개) 흥미로운 한국어 제목</h1>
+<small>뉴닉 • {date} • 읽음 {views:,}</small>
+<h2>✍️ 편집자 주 — 기사 핵심 2문장</h2>
+<h3>📊 최신 데이터</h3><p>(extra_context)</p>
+<h3>💬 전문가 전망</h3><p>(500자↑)</p>
 <h3>❓ Q&A</h3>
-<ul>
-  <li><strong>Q1:</strong> … <br> <strong>A:</strong> 두 문장↑ 분석·시나리오</li>
-  <li><strong>Q2:</strong> …</li>
-</ul>
-
-<h3>💡 본문 해설</h3>
-<p>⟪RAW_HTML⟫</p>
-
+<ul><li><strong>Q1.</strong> …?<br><strong>A.</strong> …</li>
+<li><strong>Q2.</strong> …?<br><strong>A.</strong> …</li>
+<li><strong>Q3.</strong> …?<br><strong>A.</strong> …</li></ul>
+<h3>(본문 해설)</h3><p>원문 100 % 재배치</p>
 <p>🏷️ 태그: 명사 3–6개</p>
-<p>출처: UDF.name 원문<br>
-   Photo: UDF.name<br>
-   by. 에디터 LEE🌳</p>
+<p>출처: UDF.name 원문<br>Photo: UDF.name<br>
+by. 에디터 LEE🌳<br><em>* 생성형 AI의 도움으로 작성.</em></p>
 
 <p class="related">📚 관련 기사 더 보기</p>
 """).strip()
