@@ -1,4 +1,5 @@
 openai>=1.2.4
 requests>=2.32
 beautifulsoup4>=4.12
+python-dateutil
 feedparser
