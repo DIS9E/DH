@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-udf.name.py – v3.7  (1-기사 ‘심층 확장’ + AdSense 창작성 보강판)
-• 원문 100 % 유지 + 추가 브리프(실시간 데이터·해외 헤드라인) 자동 삽입
-• 제목 한국어 변환 · 중복 헤더 제거 · 코드블록 정리 · placeholder 이미지 필터
+udf.name.py – v3.8  (AdSense 심층 확장 + 품질 가드)
+• 원문 100 % 유지 + 카테고리별 외부 데이터 삽입
+• Q&A 답변·내부 링크·출처 앵커·이미지 캡션 자동 보강
+• 제목 한국어 변환 · 중복 헤더 제거 · placeholder 이미지 필터
 """
 
 import os, sys, re, json, time, logging
@@ -23,7 +24,7 @@ POSTS_API = f"{WP_URL}/wp-json/wp/v2/posts"
 TAGS_API  = f"{WP_URL}/wp-json/wp/v2/tags"
 
 UDF_BASE   = "https://udf.name/news/"
-HEADERS    = {"User-Agent": "UDFCrawler/3.7"}
+HEADERS    = {"User-Agent": "UDFCrawler/3.8"}
 SEEN_FILE  = "seen_urls.json"
 TARGET_CAT_ID = 20
 
@@ -60,33 +61,54 @@ def parse(url):
     src = None
     if img:
         src = img.get("data-src") or img.get("src")
-        # placeholder 필터
         if src and ("placeholder" in src or "default" in src):
             src = None
     img_url=urljoin(url, src) if src else None
+    cat = url.split("/news/")[1].split("/")[0]  # economic, society, politic, war, world…
     return {"title":t.get_text(strip=True),
-            "html":str(b),
-            "image":img_url,
-            "url":url}
+            "html":  str(b),
+            "image": img_url,
+            "url":   url,
+            "cat":   cat}
 
-# ────────── 추가 브리프 생성 ──────────
-def build_brief() -> str:
-    snippets = []
-    # (1) NBRB 공식 USD/BLR 환율
+# ────────── 카테고리별 외부 브리프 ──────────
+def build_brief(cat: str, headline: str) -> str:
+    snippets=[]
+    # 로이터 RU 비즈 헤드라인 2건 (공통)
     try:
-        api = "https://www.nbrb.by/api/exrates/rates/usd?parammode=2"
-        r = requests.get(api, timeout=10).json()
-        snippets.append(f"• NBRB 공식 USD/BLR 환율 : {r['Cur_OfficialRate']} (발표 {r['Date'][:10]})")
-    except Exception as e:
-        logging.debug("NBRB fetch 실패: %s", e)
-    # (2) 로이터 러시아판 최신 헤드라인 2건
-    try:
-        rss = requests.get("https://www.reuters.com/rssFeed/ru/businessNews", timeout=10).text
-        titles = re.findall(r"<title>(.*?)</title>", rss)[1:3]   # 첫 건은 채널 제목
+        rss=requests.get("https://www.reuters.com/rssFeed/ru/businessNews",timeout=10).text
+        titles=re.findall(r"<title>(.*?)</title>",rss)[1:3]
         for t in titles:
             snippets.append(f"• 로이터: {t}")
-    except Exception as e:
-        logging.debug("로이터 RSS 실패: %s", e)
+    except: pass
+
+    if cat=="economic":
+        # NBRB 환율
+        try:
+            r=requests.get("https://www.nbrb.by/api/exrates/rates/usd?parammode=2",timeout=10).json()
+            snippets.append(f"• NBRB <a href='https://www.nbrb.by'>USD/BLR</a>: {r['Cur_OfficialRate']} (발표 {r['Date'][:10]})")
+        except: pass
+    else:
+        # BBC World 헤드라인 1건
+        try:
+            bbc=requests.get("https://feeds.bbci.co.uk/news/world/rss.xml",timeout=10).text
+            t=re.search(r"<title>(.*?)</title>",bbc).group(1)
+            snippets.append(f"• BBC: {t}")
+        except: pass
+        # WTI 유가
+        try:
+            eia=requests.get("https://api.eia.gov/series/?api_key=DEMO_KEY&series_id=PET.RWTC.D",timeout=10).json()
+            price=eia["series"][0]["data"][0][1]
+            snippets.append(f"• <a href='https://www.eia.gov'>WTI 유가</a>: ${price}")
+        except: pass
+        # USD/EUR & USD/JPY
+        try:
+            dxy=requests.get("https://api.exchangerate.host/latest?base=USD&symbols=EUR,JPY",timeout=10).json()
+            eur, jpy=dxy["rates"]["EUR"], dxy["rates"]["JPY"]
+            snippets.append(f"• USD/EUR {eur:.3f}, USD/JPY {jpy:.1f}")
+        except: pass
+
+    snippets.append(f"• 헤드라인 키워드: {headline[:60]}")
     return "\n".join(snippets)
 
 # ────────── 스타일 가이드 ──────────
@@ -105,11 +127,11 @@ STYLE_GUIDE = """
 <h3>📊 최신 데이터 & 전문가 전망</h3>
 <p>(아래 extra_context 내용을 표·리스트·문장으로 재구성)</p>
 
-<h3>이 글을 읽고 답할 수 있는 질문 💬</h3>
+<h3>❓ Q&A (답변 포함·각 답변 2문장↑ 숫자·전망 포함)</h3>
 <ul>
-  <li>Q1…?</li>
-  <li>Q2…?</li>
-  <li>Q3…?</li>
+  <li>Q1…?<br><strong>A.</strong> …</li>
+  <li>Q2…?<br><strong>A.</strong> …</li>
+  <li>Q3…?<br><strong>A.</strong> …</li>
 </ul>
 
 <h3>(첫 번째 소제목)</h3>
@@ -125,7 +147,7 @@ STYLE_GUIDE = """
 
 # ── GPT 리라이팅 ──
 def rewrite(article):
-    extra = build_brief()
+    extra=build_brief(article['cat'], article['title'])
     prompt=f"""{STYLE_GUIDE}
 
 ◆ 원문:
@@ -183,8 +205,35 @@ def tag_id(name):
     c=requests.post(TAGS_API, json={"name":name}, auth=(USER,APP_PW), timeout=10)
     return c.json()["id"] if c.status_code==201 else None
 
+# ────────── Q&A 깊이 보장 ──────────
+def ensure_depth(html: str) -> str:
+    soup=BeautifulSoup(html,"html.parser")
+    modified=False
+    for li in soup.find_all("li"):
+        txt=li.get_text()
+        if "<strong>A." not in txt:
+            continue
+        sentences=len(re.findall(r"[.!?]", txt))
+        if sentences<2:
+            # GPT mini 호출로 확장
+            prompt=(f"아래 답변을 근거·숫자·전망 포함 3문장 이상으로 확장:\n{txt}")
+            headers={"Authorization":f"Bearer {OPEN_KEY}","Content-Type":"application/json"}
+            data={"model":"gpt-4o-mini","messages":[{"role":"user","content":prompt}],
+                  "temperature":0.7,"max_tokens":100}
+            try:
+                r=requests.post("https://api.openai.com/v1/chat/completions",
+                                headers=headers,json=data,timeout=20)
+                r.raise_for_status()
+                li.string = r.json()["choices"][0]["message"]["content"].strip()
+                modified=True
+            except: pass
+    return str(soup) if modified else html
+
 # ────────── 게시 ──────────
 def publish(article: dict, txt: str, tag_ids: list[int]):
+    # 0) 길이·답변 보강
+    txt = ensure_depth(txt)
+
     hidden  = f'<a href="{article["url"]}" style="display:none">src</a>\n'
     img_tag = f'<p><img src="{article["image"]}" alt=""></p>\n' if article["image"] else ""
 
@@ -193,20 +242,40 @@ def publish(article: dict, txt: str, tag_ids: list[int]):
            if not (l.strip().startswith("```") or l.strip().startswith("📰") or l.strip().startswith("소제목"))]
     soup=BeautifulSoup("\n".join(lines),"html.parser")
 
-    # 2) 제목 변환 + 중복 h1 제거
+    # 2) 제목 변환 + <h1> 재삽입
     h1=soup.find("h1")
     orig=h1.get_text(strip=True) if h1 else article["title"]
     title=korean_title(orig, soup.get_text(" ",strip=True))
     if h1: h1.decompose()
+    new_h1=soup.new_tag("h1"); new_h1.string=title; soup.insert(0,new_h1)
+
+    # 3) 이미지 캡션
+    if img_tag:
+        img=soup.find("img")
+        if img and not img.find_next_sibling("em"):
+            caption=soup.new_tag("em"); caption.string="Photo: UDF.name"
+            img.insert_after(caption)
+
+    # 4) 내부 링크 (첫 번째 태그 기준)
+    if tag_ids:
+        try:
+            r=requests.get(POSTS_API, params={"search": tag_ids[0], "per_page": 1})
+            if r.ok and r.json():
+                link=r.json()[0]["link"]
+                more=soup.new_tag("p")
+                a=soup.new_tag("a", href=link); a.string="📚 관련 기사 더 보기"
+                more.append(a); soup.append(more)
+        except: pass
 
     body = hidden + img_tag + str(soup)
+
     payload={"title":title,"content":body,"status":"publish",
              "categories":[TARGET_CAT_ID],"tags":tag_ids}
     r=requests.post(POSTS_API,json=payload,auth=(USER,APP_PW),timeout=30)
     logging.info("  ↳ 게시 %s %s", r.status_code, r.json().get("id"))
     r.raise_for_status()
 
-# ── main ──
+# ────────── main ──────────
 def main():
     logging.basicConfig(level=logging.INFO,
         format="%(asctime)s │ %(levelname)s │ %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
