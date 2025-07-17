@@ -403,3 +403,41 @@ def publish(article: dict, txt: str, tag_ids: list[int]):
     r = requests.post(POSTS_API, json=payload, auth=(USER, APP_PW), timeout=30)
     logging.info("  ↳ 게시 %s %s", r.status_code, r.json().get("id"))
     r.raise_for_status()
+def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        stream=sys.stdout,                        # ← STDERR 대신 STDOUT으로
+        format="%(asctime)s │ %(levelname)s │ %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+
+    seen  = sync_seen(load_seen())
+    links = fetch_links()
+    todo  = [u for u in links if norm(u) not in seen and not wp_exists(norm(u))]
+    logging.info("📰 새 기사 %d / 총 %d", len(todo), len(links))
+
+    for url in todo:
+        logging.info("▶ %s", url)
+        art = parse(url)
+        time.sleep(1)
+        if not art:
+            continue
+
+        try:
+            txt = rewrite(art)
+        except Exception as e:
+            logging.warning("GPT 오류: %s", e)
+            continue
+
+        tag_ids = [tid for n in tag_names(txt) if (tid := tag_id(n))]
+        try:
+            publish(art, txt, tag_ids)
+            seen.add(norm(url))
+            save_seen(seen)
+        except Exception as e:
+            logging.warning("업로드 실패: %s", e)
+
+        time.sleep(1.5)
+
+if __name__ == "__main__":
+    main()
