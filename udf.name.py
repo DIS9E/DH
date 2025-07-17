@@ -192,19 +192,31 @@ def rewrite(article):
     views = random.randint(7_000, 12_000)
     tags_placeholder = ""
 
-    prompt_text = STYLE_GUIDE.format(
+    # STYLE_GUIDE 에 메타 플레이스홀더를 채우고, 본문+extra_context를 이어붙입니다.
+    prompt_body = STYLE_GUIDE.format(
         emoji="📰",
         title=article['title'],
         date=today,
         views=views,
         tags=tags_placeholder
     ) + f"""
-◆ 원문:
+원문:
 {article['html']}
 
-◆ extra_context:
+extra_context:
 {extra}
-"""  # <-- 이 닫는 따옴표(3개)가 꼭 필요합니다
+"""
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "당신은 ‘헤드라이트’ 스타일의 친근한 대화체로 작성해야 합니다. "
+                "정책에 민감한 제안이나 부적절한 표현은 절대 포함하지 마세요."
+            )
+        },
+        {"role": "user", "content": prompt_body}
+    ]
 
     headers = {
         "Authorization": f"Bearer {OPEN_KEY}",
@@ -212,33 +224,16 @@ def rewrite(article):
     }
     data = {
         "model": "gpt-4o",
-        "messages": [{"role": "user", "content": prompt_text}],
+        "messages": messages,
         "temperature": 0.4,
         "max_tokens": 1800
     }
-    r = requests.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers=headers,
-        json=data,
-        timeout=90
-    )
+
+    # 첫 요청
+    r = requests.post("https://api.openai.com/v1/chat/completions",
+                      headers=headers, json=data, timeout=90)
     r.raise_for_status()
     txt = r.json()["choices"][0]["message"]["content"].strip()
-
-    # 길이 보강
-    if len(txt) < 1500:
-        logging.info("  ↺ 길이 보강 재-요청")
-        data["temperature"] = 0.6
-        r2 = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers=headers,
-            json=data,
-            timeout=90
-        )
-        r2.raise_for_status()
-        txt = r2.json()["choices"][0]["message"]["content"].strip()
-
-    return txt
 
     # 길이 보강
     if len(txt) < 1500:
@@ -250,27 +245,6 @@ def rewrite(article):
         txt = r2.json()["choices"][0]["message"]["content"].strip()
 
     return txt
-    
-◆ 원문:
-{article['html']}
-
-◆ extra_context:
-{extra}
-"""
-
-    messages = [
-        {"role":"system", "content":
-         "당신은 ‘헤드라이트’ 스타일의 친근한 대화체로 작성해야 합니다. "
-         "정책에 민감한 제안이나 부적절한 표현은 절대 포함하지 마세요."},
-        {"role":"user", "content": prompt_text}
-    ]
-
-    headers = {"Authorization": f"Bearer {OPEN_KEY}", "Content-Type":"application/json"}
-    data = {"model":"gpt-4o","messages":messages,"temperature":0.4,"max_tokens":1800}
-    r = requests.post("https://api.openai.com/v1/chat/completions",
-                      headers=headers, json=data, timeout=90)
-    r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"].strip()
 
 # ─── 기타 유틸 및 게시 로직 (변경 없음) ──────────
 CYRILLIC = re.compile(r"[А-Яа-яЁё]")
