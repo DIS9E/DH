@@ -86,66 +86,51 @@ def parse(url):
 def build_brief(cat: str, headline: str) -> str:
     snippets = []
 
-    # (A) 환율 API 호출 + 단위 변환
-    rates = []
+    # 1) 한 번에 세 통화 불러오기 (base=BYN로 설정)
     try:
-        usd = requests.get(
-            "https://api.exchangerate.host/latest?base=USD&symbols=BYN",
+        r = requests.get(
+            "https://api.exchangerate.host/latest",
+            params={"base": "BYN", "symbols": "USD,EUR,KRW"},
             timeout=10
-        ).json()["rates"]["BYN"]
-        # 1 USD 단위로 출력
-        rates.append(("USD", 1, usd))
+        )
+        r.raise_for_status()
+        rates = r.json().get("rates", {})
+        usd_rate = rates.get("USD")
+        eur_rate = rates.get("EUR")
+        krw_rate = rates.get("KRW")
+
+        if usd_rate:
+            snippets.append(f"🇺🇸 1달러 = {(1 / usd_rate):.4f} BYN")
+        else:
+            snippets.append("🇺🇸 USD/BYN 환율: 데이터 없음")
+
+        if eur_rate:
+            snippets.append(f"🇪🇺 1유로 = {(1 / eur_rate):.4f} BYN")
+        else:
+            snippets.append("🇪🇺 EUR/BYN 환율: 데이터 없음")
+
+        if krw_rate:
+            snippets.append(f"🇰🇷 1,000원 = {(1_000 / krw_rate):.4f} BYN")
+        else:
+            snippets.append("🇰🇷 KRW/BYN 환율: 데이터 없음")
+
     except Exception:
-        snippets.append("• USD/BYN 환율: 데이터 없음")
+        snippets.append("⚠️ 환율 데이터: 서버 오류")
 
-    try:
-        eur = requests.get(
-            "https://api.exchangerate.host/latest?base=EUR&symbols=BYN",
-            timeout=10
-        ).json()["rates"]["BYN"]
-        # 1 EUR 단위로 출력
-        rates.append(("EUR", 1, eur))
-    except Exception:
-        snippets.append("• EUR/BYN 환율: 데이터 없음")
-
-    try:
-        krw = requests.get(
-            "https://api.exchangerate.host/latest?base=KRW&symbols=BYN",
-            timeout=10
-        ).json()["rates"]["BYN"]
-        # 1000 KRW 단위로 출력
-        rates.append(("KRW", 1_000, krw * 1_000))
-    except Exception:
-        snippets.append("• KRW/BYN 환율: 데이터 없음")
-
-    # (B) 성공한 환율만 리스트에 추가
-    for code, unit, val in rates:
-        if code in ("USD","EUR"):
-            snippets.append(f"• 1{code} = {val:.4f} BYN")
-        else:  # KRW
-            snippets.append(f"• {unit}원 = {val:.4f} BYN")
-
-    # 4) BBC World 헤드라인 1건
+    # 2) BBC World 헤드라인 1건
     if cat != "economic":
         try:
             dp_bbc = feedparser.parse("https://feeds.bbci.co.uk/news/world/rss.xml")
-            title = dp_bbc.entries[0].title.strip()
-            snippets.append(f"• BBC 헤드라인: {title}")
+            title = dp_bbc.entries[0].title.strip() if dp_bbc.entries else None
+            snippets.append(f"🇬🇧 BBC 헤드라인: {title or '데이터 없음'}")
         except:
-            snippets.append("• BBC 헤드라인: 데이터 없음")
+            snippets.append("🇬🇧 BBC 헤드라인: 데이터 없음")
 
-    # 5) Reuters RU 비즈 헤드라인 2건
-    try:
-        dp_reu = feedparser.parse("https://www.reuters.com/rssFeed/ru/businessNews")
-        for entry in dp_reu.entries[:2]:
-            snippets.append(f"• 로이터: {entry.title.strip()}")
-    except:
-        snippets.append("• 로이터: 데이터 없음")
+    # 3) 주요 키워드
+    snippets.append(f"🌐 주요 키워드: {headline.strip()[:60]}")
 
-    # 6) 주요 키워드
-    snippets.append(f"• 주요 키워드: {headline.strip()[:60]}")
-
-    return "\n".join(f"<li>{s}</li>" for s in snippets)
+    # 최종적으로 <li>로 감싸서 반환
+    return "\n".join(f"<li>{item}</li>" for item in snippets)
 
 # ────────── 스타일 가이드 ──────────
 STYLE_GUIDE = textwrap.dedent("""
