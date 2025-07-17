@@ -218,48 +218,48 @@ extra_context:
 {extra}
 """
     )
-
-# ─── GPT 호출 준비 ──────────
-messages = [
-    {
-        "role": "system",
-        "content": (
-            "당신은 ‘헤드라이트’ 뉴스레터의 톤과 문체를 100% 따라야 합니다.\n"
-            "– 친근한 대화체로, 문장마다 ‘~요’, ‘~죠’, ‘~네요?’ 같은 종결어미를 꼭 넣고, “?”와 “!”를 섞어 질문과 감탄을 자연스럽게 사용하세요.\n"
-            "– 묵직한 설명문체 대신, 독자에게 말을 건네듯 생동감 있게 써야 합니다.\n"
-            "– 무례하거나 부적절한 표현은 절대 쓰지 마세요.\n"
-            "– 정책에 민감한 단어나 부적절한 표현도 포함하지 마세요.\n\n"
-            "**📊 최신 데이터 섹션에는 반드시 다음 6개 항목을 순서대로 `<li>`로 모두 나열해야 합니다:**\n"
-            "    1) USD/BYN 환율\n"
-            "    2) EUR/BYN 환율\n"
-            "    3) KRW/BYN 환율\n"
-            "    4) BBC World 헤드라인 1건\n"
-            "    5) Reuters RU 비즈니스 헤드라인 2건\n"
-            "    6) 주요 키워드\n\n"
-            "**※ 반드시 STYLE_GUIDE 순서대로 아래 헤더 블록을 모두 포함해야 합니다.**\n"
-            "    - `<h1>…</h1>`\n"
-            "    - `<small>…</small>`\n"
-            "    - `<h3>💡 본문 정리</h3>`\n"
-            "    - `<h2>✍️ 편집자 주 …</h2>`\n"
-            "    - `<h3>📝 개요</h3>`\n"
-            "    - `<h3>📊 최신 데이터</h3>` + `<ul>…</ul>`\n"
-            "    - `<h3>💬 전문가 전망</h3>`\n"
-            "    - `<h3>❓ Q&A</h3>` + `<ul>…</ul>`\n"
-            "    - `<p>🏷️ 태그: …</p>`\n"
-            "    - `<p>출처: …</p>`\n"
-            "    - `<p class=\"related\"></p>`"
-        )
-    },
-    {
-        "role": "user",
-        "content": prompt_body
-    }
-]
+    # ─── GPT 호출 준비 ──────────
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "당신은 ‘헤드라이트’ 뉴스레터의 톤과 문체를 100% 따라야 합니다.\n"
+                "– 친근한 대화체로, 문장마다 ‘~요’, ‘~죠’, ‘~네요?’ 같은 종결어미를 꼭 넣고, “?”와 “!”를 섞어 질문과 감탄을 자연스럽게 사용하세요.\n"
+                "– 묵직한 설명문체 대신, 독자에게 말을 건네듯 생동감 있게 써야 합니다.\n"
+                "– 무례하거나 부적절한 표현은 절대 쓰지 마세요.\n"
+                "– 정책에 민감한 단어나 부적절한 표현도 포함하지 마세요.\n\n"
+                "**📊 최신 데이터 섹션에는 반드시 다음 6개 항목을 순서대로 `<li>`로 모두 나열해야 합니다:**\n"
+                "    1) USD/BYN 환율\n"
+                "    2) EUR/BYN 환율\n"
+                "    3) KRW/BYN 환율\n"
+                "    4) BBC World 헤드라인 1건\n"
+                "    5) Reuters RU 비즈니스 헤드라인 2건\n"
+                "    6) 주요 키워드\n\n"
+                "**※ 반드시 STYLE_GUIDE 순서대로 아래 헤더 블록을 모두 포함해야 합니다.**\n"
+                "    - `<h1>…</h1>`\n"
+                "    - `<small>…</small>`\n"
+                "    - `<h3>💡 본문 정리</h3>`\n"
+                "    - `<h2>✍️ 편집자 주 …</h2>`\n"
+                "    - `<h3>📝 개요</h3>`\n"
+                "    - `<h3>📊 최신 데이터</h3>` + `<ul>…</ul>`\n"
+                "    - `<h3>💬 전문가 전망</h3>`\n"
+                "    - `<h3>❓ Q&A</h3>` + `<ul>…</ul>`\n"
+                "    - `<p>🏷️ 태그: …</p>`\n"
+                "    - `<p>출처: …</p>`\n"
+                "    - `<p class=\"related\"></p>`"
+            )
+        },
+        {
+            "role": "user",
+            "content": prompt_body
+        }
+    ]
 
     headers = {
         "Authorization": f"Bearer {OPEN_KEY}",
         "Content-Type":  "application/json"
     }
+
     data = {
         "model":       "gpt-4o",
         "messages":    messages,
@@ -270,7 +270,9 @@ messages = [
     # 5) 첫 요청
     r = requests.post(
         "https://api.openai.com/v1/chat/completions",
-        headers=headers, json=data, timeout=90
+        headers=headers,
+        json=data,
+        timeout=90
     )
     r.raise_for_status()
     txt = r.json()["choices"][0]["message"]["content"].strip().replace("**", "")
