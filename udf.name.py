@@ -162,11 +162,7 @@ STYLE_GUIDE = textwrap.dedent("""
 
 <h3>📊 최신 데이터</h3>
 <ul>
-  <li>• 외부 API 기반 환율·헤드라인 등 4~6줄</li>
-  <li>• …</li>
-  <li>• …</li>
-  <li>• …</li>
-  <li>• …</li>
+  ⟪META_DATA⟫
 </ul>
 
 <h3>💬 전문가 전망</h3>
@@ -204,7 +200,35 @@ def rewrite(article):
         views=views,
         tags=tags_placeholder
     ) + f"""
+◆ extra_context:
+{extra}
+"""
 
+    headers = {
+        "Authorization": f"Bearer {OPEN_KEY}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": "gpt-4o",
+        "messages": [{"role": "user", "content": prompt_text}],
+        "temperature": 0.4,
+        "max_tokens": 1800
+    }
+    r = requests.post("https://api.openai.com/v1/chat/completions",
+                      headers=headers, json=data, timeout=90)
+    r.raise_for_status()
+    txt = r.json()["choices"][0]["message"]["content"].strip()
+
+    # 길이 Guard: 1,500자 미만이면 재요청
+    if len(txt) < 1500:
+        logging.info("  ↺ 길이 보강 재-요청")
+        data["temperature"] = 0.6
+        r2 = requests.post("https://api.openai.com/v1/chat/completions",
+                           headers=headers, json=data, timeout=90)
+        r2.raise_for_status()
+        txt = r2.json()["choices"][0]["message"]["content"].strip()
+
+    return txt
 ◆ 원문:
 {article['html']}
 
