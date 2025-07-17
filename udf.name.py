@@ -195,19 +195,20 @@ def rewrite(article):
     # 1) META_DATA 리스트 항목 생성
     meta_items = "\n".join(f"<li>{line}</li>" for line in extra.split("\n"))
 
-    # 2) STYLE_GUIDE에 RAW_HTML·META_DATA 먼저 치환하고
-    #    그다음 .format() 으로 {emoji}, {title} 등을 채웁니다
+    # 2) STYLE_GUIDE 플레이스홀더({emoji}, {title} 등)만 먼저 채우기
+    filled = STYLE_GUIDE.format(
+        emoji="📰",
+        title=article["title"],
+        date=today,
+        views=views,
+        tags=tags_placeholder
+    )
+
+    # 3) RAW_HTML·META_DATA → 실제 HTML로 교체
     prompt_body = (
-        STYLE_GUIDE
-            .replace("⟪RAW_HTML⟫",  article["html"])
-            .replace("⟪META_DATA⟫", meta_items)
-            .format(
-                emoji="📰",
-                title=article["title"],
-                date=today,
-                views=views,
-                tags=tags_placeholder
-            )
+        filled
+        .replace("⟪RAW_HTML⟫", article["html"])
+        .replace("⟪META_DATA⟫", meta_items)
         + f"""
 
 원문:
@@ -218,7 +219,7 @@ extra_context:
 """
     )
 
-    # 3) GPT 호출 메시지 정의
+    # 4) GPT 호출 메시지 정의
     messages = [
         {
             "role": "system",
@@ -236,10 +237,7 @@ extra_context:
         }
     ]
 
-    headers = {
-        "Authorization": f"Bearer {OPEN_KEY}",
-        "Content-Type":  "application/json"
-    }
+    headers = {"Authorization": f"Bearer {OPEN_KEY}", "Content-Type": "application/json"}
     data = {
         "model":       "gpt-4o",
         "messages":    messages,
@@ -247,7 +245,7 @@ extra_context:
         "max_tokens":  1800
     }
 
-    # 4) 첫 요청
+    # 5) 첫 요청
     r = requests.post(
         "https://api.openai.com/v1/chat/completions",
         headers=headers, json=data, timeout=90
@@ -255,7 +253,7 @@ extra_context:
     r.raise_for_status()
     txt = r.json()["choices"][0]["message"]["content"].strip().replace("**", "")
 
-    # 5) 길이 보강
+    # 6) 길이 보강
     if len(txt) < 1500:
         logging.info("↺ 길이 보강 재-요청")
         data["temperature"] = 0.6
