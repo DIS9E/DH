@@ -195,18 +195,20 @@ def rewrite(article):
     # 1) META_DATA 리스트 항목 생성
     meta_items = "\n".join(f"<li>{line}</li>" for line in extra.split("\n"))
 
-    # 2) STYLE_GUIDE 변수 채우고 플레이스홀더 치환
+    # 2) STYLE_GUIDE의 플레이스홀더({emoji},{title} 등)만 먼저 채우기
+    filled = STYLE_GUIDE.format(
+        emoji="📰",
+        title=article["title"],
+        date=today,
+        views=views,
+        tags=tags_placeholder
+    )
+
+    # 3) RAW_HTML·META_DATA → 실제 HTML로 교체
     prompt_body = (
-        STYLE_GUIDE
-            .replace("⟪RAW_HTML⟫", article["html"])
-            .replace("⟪META_DATA⟫", meta_items)
-            .format(
-                emoji="📰",
-                title=article["title"],
-                date=today,
-                views=views,
-                tags=tags_placeholder
-            )
+        filled
+        .replace("⟪RAW_HTML⟫", article["html"])
+        .replace("⟪META_DATA⟫", meta_items)
         + f"""
 
 원문:
@@ -217,7 +219,7 @@ extra_context:
 """
     )
 
-    # 3) GPT 호출 준비
+    # 4) GPT 호출
     messages = [
         {
             "role": "system",
@@ -229,47 +231,22 @@ extra_context:
                 "– 정책에 민감한 제안이나 부적절한 표현도 포함하지 마세요."
             )
         },
-        {
-            "role": "user",
-            "content": prompt_body
-        }
+        {"role": "user", "content": prompt_body}
     ]
-    headers = {
-        "Authorization": f"Bearer {OPEN_KEY}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "model":       "gpt-4o",
-        "messages":    messages,
-        "temperature": 0.4,
-        "max_tokens":  1800
-    }
+    headers = {"Authorization": f"Bearer {OPEN_KEY}", "Content-Type": "application/json"}
+    data = {"model":"gpt-4o","messages":messages,"temperature":0.4,"max_tokens":1800}
 
-    # 4) 첫 요청
-    r = requests.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers=headers,
-        json=data,
-        timeout=90
-    )
+    r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data, timeout=90)
     r.raise_for_status()
-    txt = r.json()["choices"][0]["message"]["content"].strip()
-    # ** 제거
-    txt = txt.replace("**", "")
+    txt = r.json()["choices"][0]["message"]["content"].strip().replace("**","")
 
     # 5) 길이 보강
     if len(txt) < 1500:
-        logging.info("  ↺ 길이 보강 재-요청")
+        logging.info("↺ 길이 보강 재-요청")
         data["temperature"] = 0.6
-        r2 = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers=headers,
-            json=data,
-            timeout=90
-        )
+        r2 = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data, timeout=90)
         r2.raise_for_status()
-        txt = r2.json()["choices"][0]["message"]["content"].strip()
-        txt = txt.replace("**", "")
+        txt = r2.json()["choices"][0]["message"]["content"].strip().replace("**","")
 
     return txt
     
