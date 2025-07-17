@@ -120,8 +120,9 @@ STYLE_GUIDE = textwrap.dedent("""
 <h3>💡 본문 정리</h3>
 <p>⟪RAW_HTML⟫</p>
 
-<h2>✍️ 편집자 주 — 기사 핵심 2문장으로</h2>
-<p>…여기에 핵심 두 문장을 적어주세요.</p>
+<h2>✍️ 편집자 주 — 이 기사, 이렇게 읽어요</h2>
+<!-- 아래 한 단락에 기사 핵심을 ‘긴 문장’ 으로 작성하세요 -->
+<p>여기에 실제 핵심 두 문장을 적어주세요.</p>
 
 <h3>(첫 번째 소제목)</h3>
 <p>…</p>
@@ -144,9 +145,9 @@ STYLE_GUIDE = textwrap.dedent("""
   <li><strong>Q3.</strong> …?<br><strong>A.</strong> …</li>
 </ul>
 
-<p>🏷️ 태그: 명사 3–6개</p>
+<p>🏷️ 태그: 명사 3-6개</p>
 <p>출처: UDF.name 원문<br>Photo: UDF.name<br>
-   by. 에디터 LEE🌳<br><em>* 생성형 AI의 도움으로 작성.</em></p>
+   by. LEE🌳<br><em>* 생성형 AI의 도움으로 작성.</em></p>
 
 <p class="related">📚 관련 기사 더 보기</p>
 """).strip()
