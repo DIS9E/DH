@@ -190,19 +190,21 @@ def rewrite(article):
     extra = build_brief(article['cat'], article['title'])
     today = datetime.now(tz=ZoneInfo("Asia/Seoul")).strftime("%Y.%m.%d")
     views = random.randint(7_000, 12_000)
-    # placeholder tags (실제 태그는 publish 후 별도 처리)
     tags_placeholder = ""
 
     prompt_text = STYLE_GUIDE.format(
-        emoji="📰",           # 실제 이모지 변환은 publish 단계에서 처리
+        emoji="📰",
         title=article['title'],
         date=today,
         views=views,
         tags=tags_placeholder
     ) + f"""
+◆ 원문:
+{article['html']}
+
 ◆ extra_context:
 {extra}
-"""
+"""  # <-- 여기에 닫는 따옴표가 반드시 필요합니다
 
     headers = {
         "Authorization": f"Bearer {OPEN_KEY}",
@@ -219,7 +221,7 @@ def rewrite(article):
     r.raise_for_status()
     txt = r.json()["choices"][0]["message"]["content"].strip()
 
-    # 길이 Guard: 1,500자 미만이면 재요청
+    # 길이 보강
     if len(txt) < 1500:
         logging.info("  ↺ 길이 보강 재-요청")
         data["temperature"] = 0.6
@@ -229,6 +231,7 @@ def rewrite(article):
         txt = r2.json()["choices"][0]["message"]["content"].strip()
 
     return txt
+    
 ◆ 원문:
 {article['html']}
 
