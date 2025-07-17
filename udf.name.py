@@ -219,6 +219,36 @@ extra_context:
 """
 )
 
+# ─── GPT 리라이팅 (정책 안전 + 메타데이터 삽입) ──────────
+def rewrite(article):
+    extra            = build_brief(article['cat'], article['title'])
+    today            = datetime.now(tz=ZoneInfo("Asia/Seoul")).strftime("%Y.%m.%d")
+    views            = random.randint(7_000, 12_000)
+    tags_placeholder = ""
+
+    # ─── prompt_body 조립 ──────────
+    meta_items = "\n".join(f"<li>{line}</li>" for line in extra.split("\n"))
+    filled     = STYLE_GUIDE.format(
+                     emoji="📰",
+                     title=article["title"],
+                     date=today,
+                     views=views,
+                     tags=tags_placeholder
+                 )
+    prompt_body = (
+        filled
+        .replace("⟪RAW_HTML⟫",   article["html"])
+        .replace("⟪META_DATA⟫",  meta_items)
+        + f"""
+
+원문:
+{article["html"]}
+
+extra_context:
+{extra}
+"""
+    )
+
     # ─── GPT 리라이팅 메시지 정의 ──────────
     messages = [
         {
@@ -227,44 +257,44 @@ extra_context:
                 "당신은 ‘헤드라이트’ 뉴스레터의 톤과 문체를 100% 따라야 합니다. "
                 "– 친근한 대화체로, 문장마다 ‘~요’, ‘~죠’, ‘~네요?’ 같은 종결어미를 꼭 넣고, “?”와 “!”를 섞어 질문과 감탄을 자연스럽게 사용하세요. "
                 "– 묵직한 설명문체 대신, 독자에게 말을 건네듯 생동감 있게 써야 합니다. "
-                "– 무례하거나 부적절한 표현은 절대 쓰지 마세요."
+                "– 무례하거나 부적절한 표현은 절대 쓰지 마세요. "
+                "– 정책에 민감한 제안이나 부적절한 표현도 포함하지 마세요."
             )
         },
-        {
-            "role": "user",
-            "content": prompt_body
-        }
+        { "role": "user", "content": prompt_body }
     ]
 
     headers = {
         "Authorization": f"Bearer {OPEN_KEY}",
-        "Content-Type": "application/json"
+        "Content-Type":  "application/json"
     }
     data = {
-        "model": "gpt-4o",
-        "messages": messages,
+        "model":       "gpt-4o",
+        "messages":    messages,
         "temperature": 0.4,
-        "max_tokens": 1800
+        "max_tokens":  1800
     }
 
-    # 첫 요청
-    r = requests.post("https://api.openai.com/v1/chat/completions",
-                      headers=headers, json=data, timeout=90)
+    # 1) 첫 요청
+    r = requests.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers=headers, json=data, timeout=90
+    )
     r.raise_for_status()
-    txt = r.json()["choices"][0]["message"]["content"].strip()
-    txt = txt.replace("**", "")
+    txt = r.json()["choices"][0]["message"]["content"].strip().replace("**", "")
 
-    # 길이 보강
+    # 2) 길이 보강
     if len(txt) < 1500:
         logging.info("  ↺ 길이 보강 재-요청")
         data["temperature"] = 0.6
-        r2 = requests.post("https://api.openai.com/v1/chat/completions",
-                           headers=headers, json=data, timeout=90)
+        r2 = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers, json=data, timeout=90
+        )
         r2.raise_for_status()
-        txt = r2.json()["choices"][0]["message"]["content"].strip()
-        txt = txt.replace("**", "")
+        txt = r2.json()["choices"][0]["message"]["content"].strip().replace("**", "")
+
     return txt
-    
 # ─── 기타 유틸 및 게시 로직 (변경 없음) ──────────
 CYRILLIC = re.compile(r"[А-Яа-яЁё]")
 
