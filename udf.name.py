@@ -17,18 +17,18 @@ import feedparser
 from bs4 import BeautifulSoup
 
 # ────────── 환경 변수 ──────────
-WP_URL      = os.getenv("WP_URL", "https://belatri.info").rstrip("/")
-USER        = os.getenv("WP_USERNAME")
-APP_PW      = os.getenv("WP_APP_PASSWORD")
-OPEN_KEY    = os.getenv("OPENAI_API_KEY")
+WP_URL        = os.getenv("WP_URL", "https://belatri.info").rstrip("/")
+USER          = os.getenv("WP_USERNAME")
+APP_PW        = os.getenv("WP_APP_PASSWORD")
+OPEN_KEY      = os.getenv("OPENAI_API_KEY")
 if not all([USER, APP_PW, OPEN_KEY]):
     sys.exit("❌  WP_USERNAME / WP_APP_PASSWORD / OPENAI_API_KEY 누락")
 
-POSTS_API   = f"{WP_URL}/wp-json/wp/v2/posts"
-TAGS_API    = f"{WP_URL}/wp-json/wp/v2/tags"
-UDF_BASE    = "https://udf.name/news/"
-HEADERS     = {"User-Agent": "UDFCrawler/3.8"}
-SEEN_FILE   = "seen_urls.json"
+POSTS_API     = f"{WP_URL}/wp-json/wp/v2/posts"
+TAGS_API      = f"{WP_URL}/wp-json/wp/v2/tags"
+UDF_BASE      = "https://udf.name/news/"
+HEADERS       = {"User-Agent": "UDFCrawler/3.8"}
+SEEN_FILE     = "seen_urls.json"
 TARGET_CAT_ID = 20
 
 norm = lambda u: urlunparse(urlparse(u)._replace(query="", params="", fragment=""))
@@ -82,7 +82,6 @@ def parse(url):
     }
 
 # ────────── 외부 데이터 수집 ──────────
-
 def build_brief(cat: str, headline: str) -> str:
     snippets = []
 
@@ -216,7 +215,9 @@ extra_context:
             "role": "system",
             "content": (
                 "당신은 ‘헤드라이트’ 스타일의 친근한 대화체로 작성해야 합니다. "
-                "정책에 민감한 제안이나 부적절한 표현은 절대 포함하지 마세요."
+                "정책에 민감한 제안이나 부적절한 표현은 절대 포함하지 마세요. "
+                "출력 시 마크다운(#, ##, ### 등)을 절대로 사용하지 말고, "
+                "반드시 HTML 태그만 사용하세요."
             )
         },
         {"role": "user", "content": prompt_body}
@@ -254,9 +255,29 @@ extra_context:
 
     return txt
 
-# ─── 기타 유틸 및 게시 로직 (변경 없음) ──────────
-CYRILLIC = re.compile(r"[А-Яа-яЁё]")
+# ─── Q&A 깊이 보장 및 기타 유틸 ──────────
+def ensure_depth(html: str) -> str:
+    soup = BeautifulSoup(html, "html.parser")
+    modified = False
+    for li in soup.find_all("li"):
+        txt = li.get_text()
+        if "<strong>A." not in txt: continue
+        if len(re.findall(r"[.!?]", txt)) < 2:
+            prompt = f"아래 답변을 근거·숫자·전망 포함 3문장 이상으로 확장:\n{txt}"
+            headers={"Authorization":f"Bearer {OPEN_KEY}","Content-Type":"application/json"}
+            data={"model":"gpt-4o-mini","messages":[{"role":"user","content":prompt}],
+                  "temperature":0.7,"max_tokens":100}
+            try:
+                r = requests.post("https://api.openai.com/v1/chat/completions",
+                                  headers=headers, json=data, timeout=20)
+                r.raise_for_status()
+                li.string = r.json()["choices"][0]["message"]["content"].strip()
+                modified = True
+            except:
+                pass
+    return str(soup) if modified else html
 
+CYRILLIC = re.compile(r"[А-Яа-яЁё]")
 def korean_title(src: str, context: str) -> str:
     if not CYRILLIC.search(src):
         return src
@@ -295,50 +316,26 @@ def tag_id(name: str) -> int|None:
     c = requests.post(TAGS_API, json={"name":name}, auth=(USER,APP_PW), timeout=10)
     return c.json().get("id") if c.status_code==201 else None
 
-def ensure_depth(html: str) -> str:
-    soup = BeautifulSoup(html, "html.parser")
-    modified = False
-    for li in soup.find_all("li"):
-        txt = li.get_text()
-        if "<strong>A." not in txt: continue
-        if len(re.findall(r"[.!?]", txt)) < 2:
-            prompt = f"아래 답변을 근거·숫자·전망 포함 3문장 이상으로 확장:\n{txt}"
-            headers={"Authorization":f"Bearer {OPEN_KEY}","Content-Type":"application/json"}
-            data={"model":"gpt-4o-mini","messages":[{"role":"user","content":prompt}],
-                  "temperature":0.7,"max_tokens":100}
-            try:
-                r = requests.post("https://api.openai.com/v1/chat/completions",
-                                  headers=headers, json=data, timeout=20)
-                r.raise_for_status()
-                li.string = r.json()["choices"][0]["message"]["content"].strip()
-                modified = True
-            except:
-                pass
-    return str(soup) if modified else html
-
 # ─── 게시 전 불필요 헤더 제거 ──────────
 def publish(article: dict, txt: str, tag_ids: list[int]):
-    # 1) Q&A 깊이 보강 등 기존 로직 유지
+    # 1) Q&A 깊이 보강 유지
     txt = ensure_depth(txt)
 
     hidden  = f'<a href="{article["url"]}" style="display:none">src</a>\n'
     img_tag = f'<p><img src="{article["image"]}" alt=""></p>\n' if article["image"] else ""
 
-    # 2) 마크다운 헤더(###, ## 등)와 "소제목", 코드블록, 기존 📰 헤더 모두 필터링
+    # 2) 마크다운 헤더(#, ##, ###) 전부 필터링
     lines = []
     for line in txt.splitlines():
-        s = line.strip()
-        if s.startswith("```") or s.startswith("#") or "소제목" in s or s.startswith("📰"):
+        if re.match(r'^\s*#+\s', line):
+            continue
+        if "소제목" in line or line.strip().startswith("```") or line.strip().startswith("📰"):
             continue
         lines.append(line)
 
     soup = BeautifulSoup("\n".join(lines), "html.parser")
 
-    # 3) 제목 재삽입, 이미지 캡션, 내부 링크 등 기존 로직 그대로
-    #    … (여기 아래는 기존 publish() 함수 내용과 동일하게 붙여넣으시면 됩니다)
-    #    (제목 변환, 캡션 추가, 관련기사 링크 삽입 등)
-
-    # 예시: 제목 재삽입 부분
+    # 3) 제목 재삽입
     h1 = soup.find("h1")
     orig = h1.get_text(strip=True) if h1 else article["title"]
     title = korean_title(orig, soup.get_text(" ", strip=True))
@@ -356,25 +353,24 @@ def publish(article: dict, txt: str, tag_ids: list[int]):
     # 내부 관련 기사 링크
     if tag_ids:
         try:
-            r = requests.get(POSTS_API, params={"tags": tag_ids[0], "per_page":1},
+            r = requests.get(POSTS_API, params={"tags":tag_ids[0],"per_page":1},
                              auth=(USER,APP_PW), timeout=10)
             if r.ok and r.json():
                 link = r.json()[0]["link"]
                 more = soup.new_tag("p")
-                a = soup.new_tag("a", href=link)
+                a    = soup.new_tag("a", href=link)
                 a.string = "📚 관련 기사 더 보기"
-                more.append(a)
-                soup.append(more)
+                more.append(a); soup.append(more)
         except:
             pass
 
     body = hidden + img_tag + str(soup)
     payload = {
-        "title": title,
-        "content": body,
-        "status": "publish",
+        "title":      title,
+        "content":    body,
+        "status":     "publish",
         "categories": [TARGET_CAT_ID],
-        "tags": tag_ids
+        "tags":       tag_ids
     }
     r = requests.post(POSTS_API, json=payload, auth=(USER,APP_PW), timeout=30)
     logging.info("  ↳ 게시 %s %s", r.status_code, r.json().get("id"))
@@ -398,8 +394,7 @@ def main():
         try:
             txt = rewrite(art)
         except Exception as e:
-            logging.warning("GPT 오류: %s", e)
-            continue
+            logging.warning("GPT 오류: %s", e); continue
 
         tag_ids = [tid for n in tag_names(txt) if (tid := tag_id(n))]
         try:
