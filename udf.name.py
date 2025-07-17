@@ -80,7 +80,7 @@ def parse(url):
         "cat":   cat
     }
 
-# ────────── 카테고리별 외외 데이터 수집 (KRW→BYN 추가) ──────────
+# ────────── 카테고리별 외부 데이터 수집 (KRW→BYN 추가) ──────────
 def build_brief(cat: str, headline: str) -> str:
     snippets = []
     # 로이터 RU 비즈 헤드라인 2건
