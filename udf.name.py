@@ -195,7 +195,7 @@ def rewrite(article):
     # 1) META_DATA 리스트 항목 생성
     meta_items = "\n".join(f"<li>{line}</li>" for line in extra.split("\n"))
 
-    # 2) STYLE_GUIDE 플레이스홀더(emoji, title, date, views, tags) 채우기
+    # 2) STYLE_GUIDE의 플레이스홀더({emoji},{title} 등)만 먼저 채우기
     filled = STYLE_GUIDE.format(
         emoji="📰",
         title=article["title"],
@@ -204,14 +204,22 @@ def rewrite(article):
         tags=tags_placeholder
     )
 
-    # 3) RAW_HTML·META_DATA 플레이스홀더 치환 → 최종 prompt_body
+    # 3) RAW_HTML·META_DATA → 실제 HTML로 교체 + 원문/extra_context 블록 추가
     prompt_body = (
         filled
         .replace("⟪RAW_HTML⟫", article["html"])
         .replace("⟪META_DATA⟫", meta_items)
+        + f"""
+
+원문:
+{article["html"]}
+
+extra_context:
+{extra}
+"""
     )
 
-    # ─── GPT 리라이팅 메시지 정의 ──────────
+    # 4) GPT 호출 메시지
     messages = [
         {
             "role": "system",
@@ -230,7 +238,7 @@ def rewrite(article):
     ]
     headers = {
         "Authorization": f"Bearer {OPEN_KEY}",
-        "Content-Type": "application/json"
+        "Content-Type":  "application/json"
     }
     data = {
         "model":       "gpt-4o",
@@ -239,7 +247,7 @@ def rewrite(article):
         "max_tokens":  1800
     }
 
-    # 4) 첫 요청
+    # 5) 첫 요청
     r = requests.post(
         "https://api.openai.com/v1/chat/completions",
         headers=headers,
@@ -249,7 +257,7 @@ def rewrite(article):
     r.raise_for_status()
     txt = r.json()["choices"][0]["message"]["content"].strip().replace("**", "")
 
-    # 5) 길이 보강
+    # 6) 길이 보강
     if len(txt) < 1500:
         logging.info("↺ 길이 보강 재-요청")
         data["temperature"] = 0.6
