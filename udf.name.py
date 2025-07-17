@@ -195,20 +195,19 @@ def rewrite(article):
     # 1) META_DATA 리스트 항목 생성
     meta_items = "\n".join(f"<li>{line}</li>" for line in extra.split("\n"))
 
-    # 2) STYLE_GUIDE의 플레이스홀더({emoji},{title} 등)만 먼저 채우기
-    filled = STYLE_GUIDE.format(
-        emoji="📰",
-        title=article["title"],
-        date=today,
-        views=views,
-        tags=tags_placeholder
-    )
-
-    # 3) RAW_HTML·META_DATA → 실제 HTML로 교체 + 원문/extra_context 블록 추가
+    # 2) STYLE_GUIDE에 RAW_HTML·META_DATA 먼저 치환하고
+    #    그다음 .format() 으로 {emoji}, {title} 등을 채웁니다
     prompt_body = (
-        filled
-        .replace("⟪RAW_HTML⟫", article["html"])
-        .replace("⟪META_DATA⟫", meta_items)
+        STYLE_GUIDE
+            .replace("⟪RAW_HTML⟫",  article["html"])
+            .replace("⟪META_DATA⟫", meta_items)
+            .format(
+                emoji="📰",
+                title=article["title"],
+                date=today,
+                views=views,
+                tags=tags_placeholder
+            )
         + f"""
 
 원문:
@@ -219,7 +218,7 @@ extra_context:
 """
     )
 
-    # 4) GPT 호출 메시지
+    # 3) GPT 호출 메시지 정의
     messages = [
         {
             "role": "system",
@@ -236,6 +235,7 @@ extra_context:
             "content": prompt_body
         }
     ]
+
     headers = {
         "Authorization": f"Bearer {OPEN_KEY}",
         "Content-Type":  "application/json"
@@ -247,25 +247,21 @@ extra_context:
         "max_tokens":  1800
     }
 
-    # 5) 첫 요청
+    # 4) 첫 요청
     r = requests.post(
         "https://api.openai.com/v1/chat/completions",
-        headers=headers,
-        json=data,
-        timeout=90
+        headers=headers, json=data, timeout=90
     )
     r.raise_for_status()
     txt = r.json()["choices"][0]["message"]["content"].strip().replace("**", "")
 
-    # 6) 길이 보강
+    # 5) 길이 보강
     if len(txt) < 1500:
         logging.info("↺ 길이 보강 재-요청")
         data["temperature"] = 0.6
         r2 = requests.post(
             "https://api.openai.com/v1/chat/completions",
-            headers=headers,
-            json=data,
-            timeout=90
+            headers=headers, json=data, timeout=90
         )
         r2.raise_for_status()
         txt = r2.json()["choices"][0]["message"]["content"].strip().replace("**", "")
