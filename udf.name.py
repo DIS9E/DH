@@ -195,7 +195,7 @@ def rewrite(article):
     # 1) META_DATA 리스트 항목 생성
     meta_items = "\n".join(f"<li>{line}</li>" for line in extra.split("\n"))
 
-    # 2) STYLE_GUIDE 플레이스홀더({emoji}, {title} 등)만 먼저 채우기
+    # 2) STYLE_GUIDE의 플레이스홀더({emoji},{title} 등)만 먼저 채워서 'filled'에 담기
     filled = STYLE_GUIDE.format(
         emoji="📰",
         title=article["title"],
@@ -204,7 +204,7 @@ def rewrite(article):
         tags=tags_placeholder
     )
 
-    # 3) RAW_HTML·META_DATA → 실제 HTML로 교체
+    # 3) RAW_HTML·META_DATA 플레이스홀더 치환 및 원문/extra_context 덧붙이기
     prompt_body = (
         filled
         .replace("⟪RAW_HTML⟫", article["html"])
@@ -219,7 +219,7 @@ extra_context:
 """
     )
 
-    # 4) GPT 호출 메시지 정의
+    # 4) GPT 호출 준비
     messages = [
         {
             "role": "system",
@@ -231,13 +231,12 @@ extra_context:
                 "– 정책에 민감한 제안이나 부적절한 표현도 포함하지 마세요."
             )
         },
-        {
-            "role": "user",
-            "content": prompt_body
-        }
+        { "role": "user", "content": prompt_body }
     ]
-
-    headers = {"Authorization": f"Bearer {OPEN_KEY}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {OPEN_KEY}",
+        "Content-Type":  "application/json"
+    }
     data = {
         "model":       "gpt-4o",
         "messages":    messages,
@@ -255,7 +254,7 @@ extra_context:
 
     # 6) 길이 보강
     if len(txt) < 1500:
-        logging.info("↺ 길이 보강 재-요청")
+        logging.info("  ↺ 길이 보강 재-요청")
         data["temperature"] = 0.6
         r2 = requests.post(
             "https://api.openai.com/v1/chat/completions",
