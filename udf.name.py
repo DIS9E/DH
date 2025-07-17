@@ -204,7 +204,7 @@ def rewrite(article):
 
 ◆ extra_context:
 {extra}
-"""  # <-- 여기에 닫는 따옴표가 반드시 필요합니다
+"""  # <-- 이 닫는 따옴표(3개)가 꼭 필요합니다
 
     headers = {
         "Authorization": f"Bearer {OPEN_KEY}",
@@ -216,10 +216,29 @@ def rewrite(article):
         "temperature": 0.4,
         "max_tokens": 1800
     }
-    r = requests.post("https://api.openai.com/v1/chat/completions",
-                      headers=headers, json=data, timeout=90)
+    r = requests.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers=headers,
+        json=data,
+        timeout=90
+    )
     r.raise_for_status()
     txt = r.json()["choices"][0]["message"]["content"].strip()
+
+    # 길이 보강
+    if len(txt) < 1500:
+        logging.info("  ↺ 길이 보강 재-요청")
+        data["temperature"] = 0.6
+        r2 = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers,
+            json=data,
+            timeout=90
+        )
+        r2.raise_for_status()
+        txt = r2.json()["choices"][0]["message"]["content"].strip()
+
+    return txt
 
     # 길이 보강
     if len(txt) < 1500:
