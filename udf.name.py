@@ -212,52 +212,53 @@ extra_context:
 """
 
 # ─── GPT 리라이팅 메시지 정의 ──────────
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "당신은 ‘헤드라이트’ 스타일의 친근한 대화체로 작성해야 합니다. "
-                "정책에 민감한 제안이나 부적절한 표현은 절대 포함하지 마세요."
-            )
-        },
-        {
-            "role": "user",
-            "content": prompt_body
-        }
-    ]
-
-    headers = {
-        "Authorization": f"Bearer {OPEN_KEY}",
-        "Content-Type": "application/json"
+messages = [
+    {
+        "role": "system",
+        "content": (
+            "당신은 ‘헤드라이트’ 뉴스레터 스타일의 친근한 대화체로 작성해야 합니다. "
+            "질문·감탄을 섞어 독자와 대화하듯 쓰고, 절대 무례하거나 부적절한 표현을 포함하지 마세요. "
+            "정책에 민감한 제안이나 부적절한 표현도 포함하지 마세요."
+        )
+    },
+    {
+        "role": "user",
+        "content": prompt_body
     }
+]
 
-    data = {
-        "model": "gpt-4o",
-        "messages": messages,
-        "temperature": 0.4,
-        "max_tokens": 1800
-    }
+headers = {
+    "Authorization": f"Bearer {OPEN_KEY}",
+    "Content-Type": "application/json"
+}
 
-    # 첫 요청
-    r = requests.post(
+data = {
+    "model": "gpt-4o",
+    "messages": messages,
+    "temperature": 0.4,
+    "max_tokens": 1800
+}
+
+# 첫 요청
+r = requests.post(
+    "https://api.openai.com/v1/chat/completions",
+    headers=headers, json=data, timeout=90
+)
+r.raise_for_status()
+txt = r.json()["choices"][0]["message"]["content"].strip()
+
+# 길이 보강
+if len(txt) < 1500:
+    logging.info("  ↺ 길이 보강 재-요청")
+    data["temperature"] = 0.6
+    r2 = requests.post(
         "https://api.openai.com/v1/chat/completions",
         headers=headers, json=data, timeout=90
     )
-    r.raise_for_status()
-    txt = r.json()["choices"][0]["message"]["content"].strip()
+    r2.raise_for_status()
+    txt = r2.json()["choices"][0]["message"]["content"].strip()
 
-    # 길이 보강
-    if len(txt) < 1500:
-        logging.info("  ↺ 길이 보강 재-요청")
-        data["temperature"] = 0.6
-        r2 = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers=headers, json=data, timeout=90
-        )
-        r2.raise_for_status()
-        txt = r2.json()["choices"][0]["message"]["content"].strip()
-
-    return txt
+return txt
 
 # ─── 기타 유틸 및 게시 로직 (변경 없음) ──────────
 CYRILLIC = re.compile(r"[А-Яа-яЁё]")
@@ -321,42 +322,50 @@ def ensure_depth(html: str) -> str:
                 pass
     return str(soup) if modified else html
 
-# ─── 게시 전 불필요 헤더 제거 ──────────
-
+# ─── 게시 전 헤더 변환/필터링 & 게시 로직 ──────────
 def publish(article: dict, txt: str, tag_ids: list[int]):
     # 1) Q&A 깊이 보강 유지
     txt = ensure_depth(txt)
 
+    # 2) 원본 URL 숨김 + 대표 이미지 태그
     hidden  = f'<a href="{article["url"]}" style="display:none">src</a>\n'
     img_tag = f'<p><img src="{article["image"]}" alt=""></p>\n' if article["image"] else ""
 
-    # 2) Markdown 헤더(# → h1, ## → h2, ### → h3), 소제목·코드블록·📰 헤더 변환/제거
+    # 3) Markdown 헤더(#, ##, ###)를 HTML <h1>-<h3>로 변환하고
+    #    코드블록, 기존 📰 헤더, '소제목' 주석은 제거
     lines = []
     for line in txt.splitlines():
         s = line.lstrip()
+
+        # (가) 제거할 패턴
         if s.startswith("```") or s.startswith("📰") or "소제목" in s:
             continue
+
+        # (나) Markdown 헤더 → HTML 헤더
         m = re.match(r'^(#{1,6})\s*(.*)$', s)
         if m:
-            level = min(len(m.group(1)), 3)
+            level   = min(len(m.group(1)), 3)       # 최대 h3
             content = m.group(2).strip()
             lines.append(f"<h{level}>{content}</h{level}>")
-        else:
-            lines.append(line)
+            continue
 
+        # (다) 일반 문장
+        lines.append(line)
+
+    # 4) BeautifulSoup으로 다시 파싱
     soup = BeautifulSoup("\n".join(lines), "html.parser")
 
-    # 3) 제목 재삽입
-    h1 = soup.find("h1")
-    orig = h1.get_text(strip=True) if h1 else article["title"]
-    title = korean_title(orig, soup.get_text(" ", strip=True))
+    # 5) 제목 재삽입 (korean_title 변환 포함)
+    h1   = soup.find("h1")
+    orig = (h1.get_text(strip=True) if h1 else article["title"])
+    title= korean_title(orig, soup.get_text(" ", strip=True))
     if h1:
         h1.decompose()
     new_h1 = soup.new_tag("h1")
     new_h1.string = title
     soup.insert(0, new_h1)
 
-    # 4) 이미지 캡션
+    # 6) 이미지 캡션
     if img_tag:
         img = soup.find("img")
         if img and not img.find_next_sibling("em"):
@@ -364,20 +373,37 @@ def publish(article: dict, txt: str, tag_ids: list[int]):
             cap.string = "Photo: UDF.name"
             img.insert_after(cap)
 
-    # 5) 내부 관련 기사 링크
+    # 7) 내부 관련 기사 링크 삽입
     if tag_ids:
         try:
-            r = requests.get(POSTS_API, params={"tags": tag_ids[0], "per_page":1},
-                             auth=(USER,APP_PW), timeout=10)
+            r = requests.get(
+                POSTS_API,
+                params={"tags": tag_ids[0], "per_page": 1},
+                auth=(USER, APP_PW),
+                timeout=10
+            )
             if r.ok and r.json():
                 link = r.json()[0]["link"]
                 more = soup.new_tag("p")
-                a = soup.new_tag("a", href=link)
+                a    = soup.new_tag("a", href=link)
                 a.string = "📚 관련 기사 더 보기"
                 more.append(a)
                 soup.append(more)
         except:
             pass
+
+    # 8) 최종 게시
+    body = hidden + img_tag + str(soup)
+    payload = {
+        "title":      title,
+        "content":    body,
+        "status":     "publish",
+        "categories": [TARGET_CAT_ID],
+        "tags":       tag_ids
+    }
+    r = requests.post(POSTS_API, json=payload, auth=(USER, APP_PW), timeout=30)
+    logging.info("  ↳ 게시 %s %s", r.status_code, r.json().get("id"))
+    r.raise_for_status()
 
     # 6) 최종 게시
     body = hidden + img_tag + str(soup)
