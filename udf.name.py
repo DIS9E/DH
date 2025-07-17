@@ -86,38 +86,37 @@ def parse(url):
 def build_brief(cat: str, headline: str) -> str:
     snippets = []
 
-    # 1) USD/BYN, EUR/BYN, KRW/BYN 모두 exchangerate.host 로 가져오기
+    # 1) BYN 기준으로 각 통화 한번에 불러오기
     try:
-        r = requests.get(
+        resp = requests.get(
             "https://api.exchangerate.host/latest",
             params={"base": "BYN", "symbols": "USD,EUR,KRW"},
             timeout=10
         )
-        r.raise_for_status()
-        rates = r.json().get("rates", {})
+        resp.raise_for_status()
+        rates = resp.json().get("rates", {})
 
-        usd_rate = rates.get("USD")
-        eur_rate = rates.get("EUR")
-        krw_rate = rates.get("KRW")
+        usd = rates.get("USD")
+        eur = rates.get("EUR")
+        krw = rates.get("KRW")
 
-        # 모두 None 이 아니면 환율 정보 추가
-        if usd_rate and eur_rate and krw_rate:
-            snippets.append(f"• 🇺🇸 1달러 = {(1 / usd_rate):.4f} BYN")
-            snippets.append(f"• 🇪🇺 1유로 = {(1 / eur_rate):.4f} BYN")
-            snippets.append(f"• 🇰🇷 1,000원 = {(1000 / krw_rate):.4f} BYN")
-        # 하나라도 빠지면 아무 것도 추가하지 않음
-
+        if usd is not None:
+            snippets.append(f"• 🇺🇸 1달러 = {1/usd:.4f} BYN")
+        if eur is not None:
+            snippets.append(f"• 🇪🇺 1유로 = {1/eur:.4f} BYN")
+        if krw is not None:
+            snippets.append(f"• 🇰🇷 1,000원 = {1000/krw:.4f} BYN")
     except Exception:
-        # API 호출 자체가 실패하면 환율 항목을 건너뜀
+        # 오류가 나면 환율 항목을 아예 추가하지 않습니다.
         pass
 
-    # 2) BBC World 헤드라인 1건
+    # 2) BBC 헤드라인
     if cat != "economic":
         try:
-            dp_bbc = feedparser.parse("https://feeds.bbci.co.uk/news/world/rss.xml")
-            title = dp_bbc.entries[0].title.strip()
+            dp = feedparser.parse("https://feeds.bbci.co.uk/news/world/rss.xml")
+            title = dp.entries[0].title.strip()
             snippets.append(f"• 🇬🇧 BBC 헤드라인: {title}")
-        except Exception:
+        except:
             snippets.append("• 🇬🇧 BBC 헤드라인: 데이터 없음")
 
     # 3) 주요 키워드
