@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-udf.name.py – v3.8  (AdSense 심층 확장 + 품질 가드)
+udf.name.py – v1.1 
 • 원문 100 % 유지 + 카테고리별 외부 데이터 삽입
 • Q&A 답변·내부 링크·출처 앵커·이미지 캡션 자동 보강
 • 제목 한국어 변환 · 중복 헤더 제거 · placeholder 이미지 필터
