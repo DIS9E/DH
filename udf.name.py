@@ -192,19 +192,24 @@ def rewrite(article):
     views = random.randint(7_000, 12_000)
     tags_placeholder = ""
 
-    # ─── prompt_body 조립 ──────────
-    meta_items = "\n".join(f"<li>{line}</li>" for line in extra.split("\n"))
+# ─── prompt_body 조립 ──────────
+meta_items = "\n".join(f"<li>{line}</li>" for line in extra.split("\n"))
 
-    prompt_body = (
-        STYLE_GUIDE.format(
-            emoji="📰",
-            title=article["title"],
-            date=today,
-            views=views,
-            tags=tags_placeholder
-        )
+# 1) STYLE_GUIDE에 변수 채우기
+filled = STYLE_GUIDE.format(
+    emoji="📰",
+    title=article["title"],
+    date=today,
+    views=views,
+    tags=tags_placeholder
+)
+
+# 2) RAW_HTML, META_DATA 플레이스홀더 치환
+prompt_body = (
+    filled
+        .replace("⟪RAW_HTML⟫", article["html"])
         .replace("⟪META_DATA⟫", meta_items)
-        + f"""
+    + f"""
 
 원문:
 {article["html"]}
@@ -212,7 +217,7 @@ def rewrite(article):
 extra_context:
 {extra}
 """
-    )
+)
 
     # ─── GPT 리라이팅 메시지 정의 ──────────
     messages = [
