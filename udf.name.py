@@ -113,7 +113,6 @@ def build_brief(cat: str, headline: str) -> str:
     return "\n".join(snippets)
 
 # ────────── 스타일 가이드 ──────────
-
 STYLE_GUIDE = textwrap.dedent("""
 <h1>(이모지 1-3개) 흥미로운 한국어 제목</h1>
 
@@ -121,8 +120,7 @@ STYLE_GUIDE = textwrap.dedent("""
 <p>⟪RAW_HTML⟫</p>
 
 <h2>✍️ 편집자 주 — 이 기사, 이렇게 읽어요</h2>
-<!-- 아래 한 단락에 기사 핵심을 ‘긴 문장’ 으로 작성하세요 -->
-<p>여기에 실제 핵심 두 문장을 적어주세요.</p>
+<p>…여기에 핵심 두 문장을 적어주세요.</p>
 
 <h3>(첫 번째 소제목)</h3>
 <p>…</p>
@@ -149,7 +147,8 @@ STYLE_GUIDE = textwrap.dedent("""
 <p>출처: UDF.name 원문<br>Photo: UDF.name<br>
    by. LEE🌳<br><em>* 생성형 AI의 도움으로 작성.</em></p>
 
-<p class="related">📚 관련 기사 더 보기</p>
+<!-- 관련 기사 링크는 publish()에서 자동 삽입됩니다 -->
+<p class="related"></p>
 """).strip()
 
 # ── GPT 리라이팅 ──
