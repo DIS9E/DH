@@ -195,14 +195,17 @@ def rewrite(article):
     # 1) extra_context 문자열을 <li> 태그로 감싸서 meta_items 생성
     meta_items = "\n".join(f"<li>{line}</li>" for line in extra.split("\n"))
 
-    # 2) 플레이스홀더 ⟪META_DATA⟫를 실제 항목으로 대체
-    prompt_body = STYLE_GUIDE.format(
-        emoji="📰",
-        title=article['title'],
-        date=today,
-        views=views,
-        tags=tags_placeholder
-    ).replace("⟪META_DATA⟫", meta_items) + f"""
+    # 2) STYLE_GUIDE의 ⟪META_DATA⟫를 교체하고 본문+extra_context를 이어붙입니다.
+    prompt_body = (
+        STYLE_GUIDE.format(
+            emoji="📰",
+            title=article['title'],
+            date=today,
+            views=views,
+            tags=tags_placeholder
+        )
+        .replace("⟪META_DATA⟫", meta_items)
+        + f"""
 
 원문:
 {article['html']}
@@ -210,6 +213,7 @@ def rewrite(article):
 extra_context:
 {extra}
 """
+    )
 
     # ─── GPT 리라이팅 메시지 정의 ──────────
     messages = [
@@ -231,7 +235,6 @@ extra_context:
         "Authorization": f"Bearer {OPEN_KEY}",
         "Content-Type": "application/json"
     }
-
     data = {
         "model": "gpt-4o",
         "messages": messages,
@@ -240,10 +243,8 @@ extra_context:
     }
 
     # 첫 요청
-    r = requests.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers=headers, json=data, timeout=90
-    )
+    r = requests.post("https://api.openai.com/v1/chat/completions",
+                      headers=headers, json=data, timeout=90)
     r.raise_for_status()
     txt = r.json()["choices"][0]["message"]["content"].strip()
 
@@ -251,14 +252,13 @@ extra_context:
     if len(txt) < 1500:
         logging.info("  ↺ 길이 보강 재-요청")
         data["temperature"] = 0.6
-        r2 = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers=headers, json=data, timeout=90
-        )
+        r2 = requests.post("https://api.openai.com/v1/chat/completions",
+                           headers=headers, json=data, timeout=90)
         r2.raise_for_status()
         txt = r2.json()["choices"][0]["message"]["content"].strip()
 
     return txt
+    
 # ─── 기타 유틸 및 게시 로직 (변경 없음) ──────────
 CYRILLIC = re.compile(r"[А-Яа-яЁё]")
 
@@ -356,7 +356,7 @@ def publish(article: dict, txt: str, tag_ids: list[int]):
 
     # 5) 제목 재삽입 (korean_title 변환 포함)
     h1   = soup.find("h1")
-    orig = (h1.get_text(strip=True) if h1 else article["title"])
+    orig = h1.get_text(strip=True) if h1 else article["title"]
     title= korean_title(orig, soup.get_text(" ", strip=True))
     if h1:
         h1.decompose()
@@ -391,7 +391,7 @@ def publish(article: dict, txt: str, tag_ids: list[int]):
         except:
             pass
 
-    # 8) 최종 게시
+    # 8) 최종 게시 (한 번만 호출)
     body = hidden + img_tag + str(soup)
     payload = {
         "title":      title,
@@ -403,83 +403,3 @@ def publish(article: dict, txt: str, tag_ids: list[int]):
     r = requests.post(POSTS_API, json=payload, auth=(USER, APP_PW), timeout=30)
     logging.info("  ↳ 게시 %s %s", r.status_code, r.json().get("id"))
     r.raise_for_status()
-
-    # 6) 최종 게시
-    body = hidden + img_tag + str(soup)
-    payload = {
-        "title":      title,
-        "content":    body,
-        "status":     "publish",
-        "categories": [TARGET_CAT_ID],
-        "tags":       tag_ids
-    }
-    r = requests.post(POSTS_API, json=payload, auth=(USER,APP_PW), timeout=30)
-    logging.info("  ↳ 게시 %s %s", r.status_code, r.json().get("id"))
-    r.raise_for_status()
-
-    # 이미지 캡션
-    if img_tag:
-        img = soup.find("img")
-        if img and not img.find_next_sibling("em"):
-            cap = soup.new_tag("em"); cap.string = "Photo: UDF.name"
-            img.insert_after(cap)
-
-    # 내부 관련 기사 링크
-    if tag_ids:
-        try:
-            r = requests.get(POSTS_API, params={"tags": tag_ids[0], "per_page":1},
-                             auth=(USER,APP_PW), timeout=10)
-            if r.ok and r.json():
-                link = r.json()[0]["link"]
-                more = soup.new_tag("p")
-                a = soup.new_tag("a", href=link)
-                a.string = "📚 관련 기사 더 보기"
-                more.append(a)
-                soup.append(more)
-        except:
-            pass
-
-    body = hidden + img_tag + str(soup)
-    payload = {
-        "title": title,
-        "content": body,
-        "status": "publish",
-        "categories": [TARGET_CAT_ID],
-        "tags": tag_ids
-    }
-    r = requests.post(POSTS_API, json=payload, auth=(USER,APP_PW), timeout=30)
-    logging.info("  ↳ 게시 %s %s", r.status_code, r.json().get("id"))
-    r.raise_for_status()
-
-def main():
-    logging.basicConfig(level=logging.INFO,
-                        format="%(asctime)s │ %(levelname)s │ %(message)s",
-                        datefmt="%Y-%m-%d %H:%M:%S")
-
-    seen  = sync_seen(load_seen())
-    links = fetch_links()
-    todo  = [u for u in links if norm(u) not in seen and not wp_exists(norm(u))]
-    logging.info("📰 새 기사 %d / 총 %d", len(todo), len(links))
-
-    for url in todo:
-        logging.info("▶ %s", url)
-        art = parse(url); time.sleep(1)
-        if not art: continue
-
-        try:
-            txt = rewrite(art)
-        except Exception as e:
-            logging.warning("GPT 오류: %s", e)
-            continue
-
-        tag_ids = [tid for n in tag_names(txt) if (tid := tag_id(n))]
-        try:
-            publish(art, txt, tag_ids)
-            seen.add(norm(url)); save_seen(seen)
-        except Exception as e:
-            logging.warning("업로드 실패: %s", e)
-
-        time.sleep(1.5)
-
-if __name__=="__main__":
-    main()
