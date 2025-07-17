@@ -220,9 +220,10 @@ extra_context:
         {
             "role": "system",
             "content": (
-                "당신은 ‘헤드라이트’ 뉴스레터 스타일의 친근한 대화체로 작성해야 합니다. "
-                "질문·감탄을 섞어 독자와 대화하듯 쓰고, 절대 무례하거나 부적절한 표현을 포함하지 마세요. "
-                "정책에 민감한 제안이나 부적절한 표현도 포함하지 마세요."
+                "당신은 ‘헤드라이트’ 뉴스레터의 톤과 문체를 100% 따라야 합니다. "
+                "– 친근한 대화체로, 문장마다 ‘~요’, ‘~죠’, ‘~네요?’ 같은 종결어미를 꼭 넣고, “?”와 “!”를 섞어 질문과 감탄을 자연스럽게 사용하세요. "
+                "– 묵직한 설명문체 대신, 독자에게 말을 건네듯 생동감 있게 써야 합니다. "
+                "– 무례하거나 부적절한 표현은 절대 쓰지 마세요."
             )
         },
         {
@@ -247,6 +248,7 @@ extra_context:
                       headers=headers, json=data, timeout=90)
     r.raise_for_status()
     txt = r.json()["choices"][0]["message"]["content"].strip()
+    txt = txt.replace("**", "")
 
     # 길이 보강
     if len(txt) < 1500:
@@ -256,7 +258,7 @@ extra_context:
                            headers=headers, json=data, timeout=90)
         r2.raise_for_status()
         txt = r2.json()["choices"][0]["message"]["content"].strip()
-
+        txt = txt.replace("**", "")
     return txt
     
 # ─── 기타 유틸 및 게시 로직 (변경 없음) ──────────
