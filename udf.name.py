@@ -112,44 +112,56 @@ def build_brief(cat: str, headline: str) -> str:
     snippets.append(f"• 헤드라인 키워드: {headline[:60]}")
     return "\n".join(snippets)
 
+# ────────── 작성 규칙 ──────────
+# • 반드시 HTML 태그만 사용(코드블록·백틱 X)
+# • **원문 문장을 하나도 빼지 말고** 어순·어휘만 자연스럽게 바꿀 것
+# • 톤: ‘헤드라이트’ 뉴스레터처럼 친근한 대화체 + 질문·감탄
+# • 제목은 45자↓ 한국어 · 기사 분위기에 맞는 이모지 1–3개
+
 # ────────── 스타일 가이드 ──────────
 STYLE_GUIDE = textwrap.dedent("""
-<h1>(이모지 1-3개) 흥미로운 한국어 제목</h1>
+<h1>{emoji} {title}</h1>
+<small>UDF • {date} • 읽음 {views:,}</small>
+
+<h2>✍️ 편집자 주 — 이 기사, 이렇게 읽어요</h2>
+<p>…여기에 핵심을 ‘긴 문장’ 2개로 작성하세요.</p>
 
 <h3>💡 본문 정리</h3>
 <p>⟪RAW_HTML⟫</p>
 
-<h2>✍️ 편집자 주 — 이 기사, 이렇게 읽어요</h2>
-<p>…여기에 핵심 두 문장을 적어주세요.</p>
-
-<h3>(첫 번째 소제목)</h3>
-<p>…</p>
-
-<h3>(두 번째 소제목)</h3>
-<p>…</p>
+<h3>📝 개요</h3>
+<p>원문 내용을 100% 재배치하고, 추가 조사·분석을 더해 500자 이상 풍부하게 기술하세요.</p>
 
 <h3>📊 최신 데이터</h3>
 <ul>
-  <li>헤드라인 및 관련정보 4~6줄</li>
+  <li>• 환율·유가·헤드라인 등 외부 API 기반 정보 4~6줄</li>
+  <li>• …</li>
+  <li>• …</li>
+  <li>• …</li>
+  <li>• …</li>
 </ul>
 
 <h3>💬 전문가 전망</h3>
-<p>근거·숫자 포함 분석 2문단(500자↑)</p>
+<p>첫 번째 단락: 구체적 근거·숫자 포함 4문장 이상</p>
+<p>두 번째 단락: 시나리오·전망 포함 4문장 이상</p>
 
 <h3>❓ Q&A</h3>
 <ul>
-  <li><strong>Q1.</strong> …?<br><strong>A.</strong> …</li>
-  <li><strong>Q2.</strong> …?<br><strong>A.</strong> …</li>
-  <li><strong>Q3.</strong> …?<br><strong>A.</strong> …</li>
+  <li><strong>Q1.</strong> …?<br><strong>A.</strong> 2문장 이상, 분석·전망 포함</li>
+  <li><strong>Q2.</strong> …?</li>
+  <li><strong>Q3.</strong> …?</li>
 </ul>
 
-<p>🏷️ 태그: 명사 3-6개</p>
-<p>출처: UDF.name 원문<br>Photo: UDF.name<br>
-   by. LEE🌳<br><em>* 생성형 AI의 도움으로 작성.</em></p>
+<p>🏷️ 태그: {tags}</p>
+<p>출처: UDF.name 원문<br>
+   Photo: UDF.name<br>
+   by. LEE🌳<br>
+   <em>* 생성형 AI의 도움으로 작성.</em></p>
 
-<!-- 관련 기사 링크는 publish()에서 자동 삽입됩니다 -->
 <p class="related"></p>
 """).strip()
+
+# 관련 기사 링크는 publish()에서 자동 삽입됩니다
 
 # ── GPT 리라이팅 ──
 def rewrite(article):
