@@ -322,6 +322,7 @@ def ensure_depth(html: str) -> str:
     return str(soup) if modified else html
 
 # ─── 게시 전 불필요 헤더 제거 ──────────
+
 def publish(article: dict, txt: str, tag_ids: list[int]):
     # 1) Q&A 깊이 보강 유지
     txt = ensure_depth(txt)
@@ -333,25 +334,63 @@ def publish(article: dict, txt: str, tag_ids: list[int]):
     lines = []
     for line in txt.splitlines():
         s = line.lstrip()
-
-        # (1) 코드블록, 기존 📰 헤더, '소제목' 주석은 제거
         if s.startswith("```") or s.startswith("📰") or "소제목" in s:
             continue
-
-        # (2) Markdown 헤더를 HTML <h*> 로 변환
         m = re.match(r'^(#{1,6})\s*(.*)$', s)
         if m:
             level = min(len(m.group(1)), 3)
             content = m.group(2).strip()
             lines.append(f"<h{level}>{content}</h{level}>")
-            continue
-
-        # (3) 그 외 일반 문장
-        lines.append(line)
+        else:
+            lines.append(line)
 
     soup = BeautifulSoup("\n".join(lines), "html.parser")
 
-    # 이하 기존 로직(제목 재삽입·이미지 캡션·관련기사 링크 등) 계속…
+    # 3) 제목 재삽입
+    h1 = soup.find("h1")
+    orig = h1.get_text(strip=True) if h1 else article["title"]
+    title = korean_title(orig, soup.get_text(" ", strip=True))
+    if h1:
+        h1.decompose()
+    new_h1 = soup.new_tag("h1")
+    new_h1.string = title
+    soup.insert(0, new_h1)
+
+    # 4) 이미지 캡션
+    if img_tag:
+        img = soup.find("img")
+        if img and not img.find_next_sibling("em"):
+            cap = soup.new_tag("em")
+            cap.string = "Photo: UDF.name"
+            img.insert_after(cap)
+
+    # 5) 내부 관련 기사 링크
+    if tag_ids:
+        try:
+            r = requests.get(POSTS_API, params={"tags": tag_ids[0], "per_page":1},
+                             auth=(USER,APP_PW), timeout=10)
+            if r.ok and r.json():
+                link = r.json()[0]["link"]
+                more = soup.new_tag("p")
+                a = soup.new_tag("a", href=link)
+                a.string = "📚 관련 기사 더 보기"
+                more.append(a)
+                soup.append(more)
+        except:
+            pass
+
+    # 6) 최종 게시
+    body = hidden + img_tag + str(soup)
+    payload = {
+        "title":      title,
+        "content":    body,
+        "status":     "publish",
+        "categories": [TARGET_CAT_ID],
+        "tags":       tag_ids
+    }
+    r = requests.post(POSTS_API, json=payload, auth=(USER,APP_PW), timeout=30)
+    logging.info("  ↳ 게시 %s %s", r.status_code, r.json().get("id"))
+    r.raise_for_status()
 
     # 이미지 캡션
     if img_tag:
