@@ -211,55 +211,54 @@ extra_context:
 {extra}
 """
 
-# ─── GPT 리라이팅 메시지 정의 ──────────
-messages = [
-    {
-        "role": "system",
-        "content": (
-            "당신은 ‘헤드라이트’ 뉴스레터 스타일의 친근한 대화체로 작성해야 합니다. "
-            "질문·감탄을 섞어 독자와 대화하듯 쓰고, 절대 무례하거나 부적절한 표현을 포함하지 마세요. "
-            "정책에 민감한 제안이나 부적절한 표현도 포함하지 마세요."
-        )
-    },
-    {
-        "role": "user",
-        "content": prompt_body
+    # ─── GPT 리라이팅 메시지 정의 ──────────
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "당신은 ‘헤드라이트’ 뉴스레터 스타일의 친근한 대화체로 작성해야 합니다. "
+                "질문·감탄을 섞어 독자와 대화하듯 쓰고, 절대 무례하거나 부적절한 표현을 포함하지 마세요. "
+                "정책에 민감한 제안이나 부적절한 표현도 포함하지 마세요."
+            )
+        },
+        {
+            "role": "user",
+            "content": prompt_body
+        }
+    ]
+
+    headers = {
+        "Authorization": f"Bearer {OPEN_KEY}",
+        "Content-Type": "application/json"
     }
-]
 
-headers = {
-    "Authorization": f"Bearer {OPEN_KEY}",
-    "Content-Type": "application/json"
-}
+    data = {
+        "model": "gpt-4o",
+        "messages": messages,
+        "temperature": 0.4,
+        "max_tokens": 1800
+    }
 
-data = {
-    "model": "gpt-4o",
-    "messages": messages,
-    "temperature": 0.4,
-    "max_tokens": 1800
-}
-
-# 첫 요청
-r = requests.post(
-    "https://api.openai.com/v1/chat/completions",
-    headers=headers, json=data, timeout=90
-)
-r.raise_for_status()
-txt = r.json()["choices"][0]["message"]["content"].strip()
-
-# 길이 보강
-if len(txt) < 1500:
-    logging.info("  ↺ 길이 보강 재-요청")
-    data["temperature"] = 0.6
-    r2 = requests.post(
+    # 첫 요청
+    r = requests.post(
         "https://api.openai.com/v1/chat/completions",
         headers=headers, json=data, timeout=90
     )
-    r2.raise_for_status()
-    txt = r2.json()["choices"][0]["message"]["content"].strip()
+    r.raise_for_status()
+    txt = r.json()["choices"][0]["message"]["content"].strip()
 
-return txt
+    # 길이 보강
+    if len(txt) < 1500:
+        logging.info("  ↺ 길이 보강 재-요청")
+        data["temperature"] = 0.6
+        r2 = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers, json=data, timeout=90
+        )
+        r2.raise_for_status()
+        txt = r2.json()["choices"][0]["message"]["content"].strip()
 
+    return txt
 # ─── 기타 유틸 및 게시 로직 (변경 없음) ──────────
 CYRILLIC = re.compile(r"[А-Яа-яЁё]")
 
