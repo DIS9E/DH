@@ -185,69 +185,86 @@ STYLE_GUIDE = textwrap.dedent("""
 <p class="related"></p>
 """).strip()
 
-# ─── GPT 리라이팅 (정책 안전 + 메타데이터 삽입) ──────────
-def rewrite(article):
-    extra = build_brief(article['cat'], article['title'])
-    today = datetime.now(tz=ZoneInfo("Asia/Seoul")).strftime("%Y.%m.%d")
-    views = random.randint(7_000, 12_000)
-    tags_placeholder = ""
-
-# ─── prompt_body 조립 ──────────
-meta_items = "\n".join(f"<li>{line}</li>" for line in extra.split("\n"))
-
-# 1) STYLE_GUIDE에 변수 채우기
-filled = STYLE_GUIDE.format(
-    emoji="📰",
-    title=article["title"],
-    date=today,
-    views=views,
-    tags=tags_placeholder
-)
-
-# 2) RAW_HTML, META_DATA 플레이스홀더 치환
-prompt_body = (
-    filled
-        .replace("⟪RAW_HTML⟫", article["html"])
-        .replace("⟪META_DATA⟫", meta_items)
-    + f"""
-
-원문:
-{article["html"]}
-
-extra_context:
-{extra}
-"""
-)
-
-# ─── GPT 리라이팅 (정책 안전 + 메타데이터 삽입) ──────────
-def rewrite(article):
-    extra            = build_brief(article['cat'], article['title'])
-    today            = datetime.now(tz=ZoneInfo("Asia/Seoul")).strftime("%Y.%m.%d")
-    views            = random.randint(7_000, 12_000)
-    tags_placeholder = ""
-
-    # ─── prompt_body 조립 ──────────
-    meta_items = "\n".join(f"<li>{line}</li>" for line in extra.split("\n"))
-    filled     = STYLE_GUIDE.format(
-                     emoji="📰",
-                     title=article["title"],
-                     date=today,
-                     views=views,
-                     tags=tags_placeholder
-                 )
-    prompt_body = (
-        filled
-        .replace("⟪RAW_HTML⟫",   article["html"])
-        .replace("⟪META_DATA⟫",  meta_items)
-        + f"""
-
-원문:
-{article["html"]}
-
-extra_context:
-{extra}
-"""
-    )
+- # ─── prompt_body 조립 ──────────
+- meta_items = "\n".join(f"<li>{line}</li>" for line in extra.split("\n"))
+-
+- # 1) STYLE_GUIDE에 변수 채우기
+- filled = STYLE_GUIDE.format(
+-     emoji="📰",
+-     title=article["title"],
+-     date=today,
+-     views=views,
+-     tags=tags_placeholder
+- )
+- # 2) RAW_HTML, META_DATA 플레이스홀더 치환
+- prompt_body = (
+-     filled
+-         .replace("⟪RAW_HTML⟫", article["html"])
+-         .replace("⟪META_DATA⟫", meta_items)
+-     + f"""
+-
+- 원문:
+-{article["html"]}
+-
+-extra_context:
+-{extra}
+-"""
+- )
+-
+- # ─── GPT 리라이팅 (정책 안전 + 메타데이터 삽입) ──────────
+-def rewrite(article):
++def rewrite(article):
+     extra = build_brief(article['cat'], article['title'])
+     today = datetime.now(tz=ZoneInfo("Asia/Seoul")).strftime("%Y.%m.%d")
+     views = random.randint(7_000, 12_000)
+     tags_placeholder = ""
+ 
+-    # ─── prompt_body 조립 ──────────
+-    meta_items = "\n".join(f"<li>{line}</li>" for line in extra.split("\n"))
++    # 1) META_DATA 리스트 항목 생성
++    meta_items = "\n".join(f"<li>{line}</li>" for line in extra.split("\n"))
+ 
+-    filled = STYLE_GUIDE.format(
+-        emoji="📰",
+-        title=article["title"],
+-        date=today,
+-        views=views,
+-        tags=tags_placeholder
+-    )
+-    prompt_body = (
+-        filled
+-        .replace("⟪RAW_HTML⟫", article["html"])
+-        .replace("⟪META_DATA⟫", meta_items)
+-        + f"""
+-
+- 원문:
+-{article["html"]}
+-
+-extra_context:
+-{extra}
+-"""
+-    )
++    # 2) STYLE_GUIDE 변수 채우고 플레이스홀더 치환
++    prompt_body = (
++        STYLE_GUIDE
++           .replace("⟪RAW_HTML⟫",    article["html"])
++           .replace("⟪META_DATA⟫",   meta_items)
++           .format(
++               emoji="📰",
++               title=article["title"],
++               date=today,
++               views=views,
++               tags=tags_placeholder
++           )
++        + f"""
++
++원문:
++{article["html"]}
++
++extra_context:
++{extra}
++"""
++    )
 
     # ─── GPT 리라이팅 메시지 정의 ──────────
     messages = [
