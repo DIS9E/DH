@@ -108,11 +108,11 @@ def build_brief(cat: str, headline: str) -> str:
         krw = rates.get("KRW")
 
         if usd is not None:
-            snippets.append(f"• 🇺🇸 1달러 = {1/usd:.4f} BYN")
+            snippets.append(f" 🇺🇸 1달러 = {1/usd:.4f} BYN")
         if eur is not None:
-            snippets.append(f"• 🇪🇺 1유로 = {1/eur:.4f} BYN")
+            snippets.append(f" 🇪🇺 1유로 = {1/eur:.4f} BYN")
         if krw is not None:
-            snippets.append(f"• 🇰🇷 1,000원 = {1000/krw:.4f} BYN")
+            snippets.append(f" 🇰🇷 1,000원 = {1000/krw:.4f} BYN")
     except Exception:
         # 환율 수집 실패 시, 아무 항목도 추가하지 않습니다.
         pass
@@ -122,12 +122,12 @@ def build_brief(cat: str, headline: str) -> str:
         try:
             dp = feedparser.parse("https://feeds.bbci.co.uk/news/world/rss.xml")
             title = dp.entries[0].title.strip()
-            snippets.append(f"• 🇬🇧 BBC 헤드라인: {title}")
+            snippets.append(f" 🇬🇧 BBC 헤드라인: {title}")
         except Exception:
-            snippets.append("• 🇬🇧 BBC 헤드라인: 데이터 없음")
+            snippets.append(" 🇬🇧 BBC 헤드라인: 데이터 없음")
 
     # 3) 주요 키워드
-    snippets.append(f"• 🌐 주요 키워드: {headline.strip()[:60]}")
+    snippets.append(f" 🌐 주요 키워드: {headline.strip()[:60]}")
 
     # <li> 태그로 감싸서 반환
     return "\n".join(f"<li>{s}</li>" for s in snippets)
