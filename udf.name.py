@@ -86,64 +86,66 @@ def parse(url):
 def build_brief(cat: str, headline: str) -> str:
     snippets = []
 
-    # 1) 환율: USD/BYN
+    # (A) 환율 API 호출 + 단위 변환
+    rates = []
     try:
         usd = requests.get(
             "https://api.exchangerate.host/latest?base=USD&symbols=BYN",
             timeout=10
-        ).json().get("rates", {}).get("BYN")
-        if usd is not None:
-            snippets.append(f"• USD/BYN 환율: {usd:.4f}")
+        ).json()["rates"]["BYN"]
+        # 1 USD 단위로 출력
+        rates.append(("USD", 1, usd))
     except Exception:
         snippets.append("• USD/BYN 환율: 데이터 없음")
 
-    # 2) 환율: EUR/BYN
     try:
         eur = requests.get(
             "https://api.exchangerate.host/latest?base=EUR&symbols=BYN",
             timeout=10
-        ).json().get("rates", {}).get("BYN")
-        if eur is not None:
-            snippets.append(f"• EUR/BYN 환율: {eur:.4f}")
+        ).json()["rates"]["BYN"]
+        # 1 EUR 단위로 출력
+        rates.append(("EUR", 1, eur))
     except Exception:
         snippets.append("• EUR/BYN 환율: 데이터 없음")
 
-    # 3) 환율: KRW/BYN
     try:
         krw = requests.get(
             "https://api.exchangerate.host/latest?base=KRW&symbols=BYN",
             timeout=10
-        ).json().get("rates", {}).get("BYN")
-        if krw is not None:
-            snippets.append(f"• KRW/BYN 환율: {krw:.4f}")
+        ).json()["rates"]["BYN"]
+        # 1000 KRW 단위로 출력
+        rates.append(("KRW", 1_000, krw * 1_000))
     except Exception:
         snippets.append("• KRW/BYN 환율: 데이터 없음")
+
+    # (B) 성공한 환율만 리스트에 추가
+    for code, unit, val in rates:
+        if code in ("USD","EUR"):
+            snippets.append(f"• 1{code} = {val:.4f} BYN")
+        else:  # KRW
+            snippets.append(f"• {unit}원 = {val:.4f} BYN")
 
     # 4) BBC World 헤드라인 1건
     if cat != "economic":
         try:
             dp_bbc = feedparser.parse("https://feeds.bbci.co.uk/news/world/rss.xml")
-            if dp_bbc.entries and dp_bbc.entries[0].title:
-                title = dp_bbc.entries[0].title.strip()
-                snippets.append(f"• BBC 헤드라인: {title}")
-            else:
-                snippets.append("• BBC 헤드라인: 데이터 없음")
-        except Exception:
+            title = dp_bbc.entries[0].title.strip()
+            snippets.append(f"• BBC 헤드라인: {title}")
+        except:
             snippets.append("• BBC 헤드라인: 데이터 없음")
 
-    # 5) 로이터 RU 비즈 헤드라인 2건
+    # 5) Reuters RU 비즈 헤드라인 2건
     try:
         dp_reu = feedparser.parse("https://www.reuters.com/rssFeed/ru/businessNews")
         for entry in dp_reu.entries[:2]:
-            if entry.title:
-                snippets.append(f"• 로이터: {entry.title.strip()}")
-    except Exception:
+            snippets.append(f"• 로이터: {entry.title.strip()}")
+    except:
         snippets.append("• 로이터: 데이터 없음")
 
     # 6) 주요 키워드
     snippets.append(f"• 주요 키워드: {headline.strip()[:60]}")
 
-    return "\n".join(snippets)
+    return "\n".join(f"<li>{s}</li>" for s in snippets)
 
 # ────────── 스타일 가이드 ──────────
 STYLE_GUIDE = textwrap.dedent("""
@@ -218,6 +220,7 @@ extra_context:
 {extra}
 """
     )
+
     # ─── GPT 호출 준비 ──────────
     messages = [
         {
@@ -227,7 +230,7 @@ extra_context:
                 "– 친근한 대화체로, 문장마다 ‘~요’, ‘~죠’, ‘~네요?’ 같은 종결어미를 꼭 넣고, “?”와 “!”를 섞어 질문과 감탄을 자연스럽게 사용하세요.\n"
                 "– 묵직한 설명문체 대신, 독자에게 말을 건네듯 생동감 있게 써야 합니다.\n"
                 "– 무례하거나 부적절한 표현은 절대 쓰지 마세요.\n"
-                "– 정책에 민감한 단어나 부적절한 표현도 포함하지 마세요.\n\n"
+                "– 정책에 민감한 제안이나 부적절한 표현도 포함하지 마세요.\n\n"
                 "**📊 최신 데이터 섹션에는 반드시 다음 6개 항목을 순서대로 `<li>`로 모두 나열해야 합니다:**\n"
                 "    1) USD/BYN 환율\n"
                 "    2) EUR/BYN 환율\n"
@@ -267,7 +270,7 @@ extra_context:
         "max_tokens":  1800
     }
 
-    # 5) 첫 요청
+    # 4) 첫 요청
     r = requests.post(
         "https://api.openai.com/v1/chat/completions",
         headers=headers,
@@ -277,13 +280,15 @@ extra_context:
     r.raise_for_status()
     txt = r.json()["choices"][0]["message"]["content"].strip().replace("**", "")
 
-    # 6) 길이 보강
+    # 5) 길이 보강
     if len(txt) < 1500:
         logging.info("  ↺ 길이 보강 재-요청")
         data["temperature"] = 0.6
         r2 = requests.post(
             "https://api.openai.com/v1/chat/completions",
-            headers=headers, json=data, timeout=90
+            headers=headers,
+            json=data,
+            timeout=90
         )
         r2.raise_for_status()
         txt = r2.json()["choices"][0]["message"]["content"].strip().replace("**", "")
