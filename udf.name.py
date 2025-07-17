@@ -185,21 +185,25 @@ STYLE_GUIDE = textwrap.dedent("""
 <p class="related"></p>
 """).strip()
 
-# ─── GPT 리라이팅 (정책 안전 가이드 포함) ──────────
+# ─── GPT 리라이팅 (정책 안전 + 메타데이터 삽입) ──────────
 def rewrite(article):
     extra = build_brief(article['cat'], article['title'])
     today = datetime.now(tz=ZoneInfo("Asia/Seoul")).strftime("%Y.%m.%d")
     views = random.randint(7_000, 12_000)
     tags_placeholder = ""
 
-    # STYLE_GUIDE 에 메타 플레이스홀더를 채우고, 본문+extra_context를 이어붙입니다.
+    # 1) extra_context 문자열을 <li> 태그로 감싸서 meta_items 생성
+    meta_items = "\n".join(f"<li>{line}</li>" for line in extra.split("\n"))
+
+    # 2) 플레이스홀더 ⟪META_DATA⟫를 실제 항목으로 대체
     prompt_body = STYLE_GUIDE.format(
         emoji="📰",
         title=article['title'],
         date=today,
         views=views,
         tags=tags_placeholder
-    ) + f"""
+    ).replace("⟪META_DATA⟫", meta_items) + f"""
+
 원문:
 {article['html']}
 
@@ -230,8 +234,10 @@ extra_context:
     }
 
     # 첫 요청
-    r = requests.post("https://api.openai.com/v1/chat/completions",
-                      headers=headers, json=data, timeout=90)
+    r = requests.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers=headers, json=data, timeout=90
+    )
     r.raise_for_status()
     txt = r.json()["choices"][0]["message"]["content"].strip()
 
@@ -239,8 +245,10 @@ extra_context:
     if len(txt) < 1500:
         logging.info("  ↺ 길이 보강 재-요청")
         data["temperature"] = 0.6
-        r2 = requests.post("https://api.openai.com/v1/chat/completions",
-                           headers=headers, json=data, timeout=90)
+        r2 = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers, json=data, timeout=90
+        )
         r2.raise_for_status()
         txt = r2.json()["choices"][0]["message"]["content"].strip()
 
@@ -308,19 +316,32 @@ def ensure_depth(html: str) -> str:
                 pass
     return str(soup) if modified else html
 
+# ─── 게시 전 불필요 헤더 제거 ──────────
 def publish(article: dict, txt: str, tag_ids: list[int]):
-    txt   = ensure_depth(txt)
-    hidden = f'<a href="{article["url"]}" style="display:none">src</a>\n'
+    # 1) Q&A 깊이 보강 등 기존 로직 유지
+    txt = ensure_depth(txt)
+
+    hidden  = f'<a href="{article["url"]}" style="display:none">src</a>\n'
     img_tag = f'<p><img src="{article["image"]}" alt=""></p>\n' if article["image"] else ""
 
-    lines = [l for l in txt.splitlines()
-             if not (l.strip().startswith("```") or l.strip().startswith("📰") or "소제목" in l)]
+    # 2) 마크다운 헤더(###, ## 등)와 "소제목", 코드블록, 기존 📰 헤더 모두 필터링
+    lines = []
+    for line in txt.splitlines():
+        s = line.strip()
+        if s.startswith("```") or s.startswith("#") or "소제목" in s or s.startswith("📰"):
+            continue
+        lines.append(line)
+
     soup = BeautifulSoup("\n".join(lines), "html.parser")
 
-    # 제목 재삽입
-    h1   = soup.find("h1")
-    orig = (h1.get_text(strip=True) if h1 else article["title"])
-    title= korean_title(orig, soup.get_text(" ", strip=True))
+    # 3) 제목 재삽입, 이미지 캡션, 내부 링크 등 기존 로직 그대로
+    #    … (여기 아래는 기존 publish() 함수 내용과 동일하게 붙여넣으시면 됩니다)
+    #    (제목 변환, 캡션 추가, 관련기사 링크 삽입 등)
+
+    # 예시: 제목 재삽입 부분
+    h1 = soup.find("h1")
+    orig = h1.get_text(strip=True) if h1 else article["title"]
+    title = korean_title(orig, soup.get_text(" ", strip=True))
     if h1: h1.decompose()
     new_h1 = soup.new_tag("h1"); new_h1.string = title
     soup.insert(0, new_h1)
@@ -335,12 +356,12 @@ def publish(article: dict, txt: str, tag_ids: list[int]):
     # 내부 관련 기사 링크
     if tag_ids:
         try:
-            r = requests.get(POSTS_API, params={"tags":tag_ids[0],"per_page":1},
+            r = requests.get(POSTS_API, params={"tags": tag_ids[0], "per_page":1},
                              auth=(USER,APP_PW), timeout=10)
             if r.ok and r.json():
                 link = r.json()[0]["link"]
                 more = soup.new_tag("p")
-                a    = soup.new_tag("a", href=link)
+                a = soup.new_tag("a", href=link)
                 a.string = "📚 관련 기사 더 보기"
                 more.append(a)
                 soup.append(more)
@@ -348,10 +369,14 @@ def publish(article: dict, txt: str, tag_ids: list[int]):
             pass
 
     body = hidden + img_tag + str(soup)
-    payload = {"title":title,"content":body,
-               "status":"publish","categories":[TARGET_CAT_ID],"tags":tag_ids}
-    r = requests.post(POSTS_API, json=payload,
-                      auth=(USER,APP_PW), timeout=30)
+    payload = {
+        "title": title,
+        "content": body,
+        "status": "publish",
+        "categories": [TARGET_CAT_ID],
+        "tags": tag_ids
+    }
+    r = requests.post(POSTS_API, json=payload, auth=(USER,APP_PW), timeout=30)
     logging.info("  ↳ 게시 %s %s", r.status_code, r.json().get("id"))
     r.raise_for_status()
 
