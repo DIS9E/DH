@@ -80,7 +80,7 @@ def parse(url):
         "cat":   cat
     }
 
-# ────────── 카테고리별 외부 데이터 수집 ──────────
+# ────────── 카테고리별 외외 데이터 수집 (KRW→BYN 추가) ──────────
 def build_brief(cat: str, headline: str) -> str:
     snippets = []
     # 로이터 RU 비즈 헤드라인 2건
@@ -92,16 +92,35 @@ def build_brief(cat: str, headline: str) -> str:
     except:
         pass
 
-    # 통화 환율 (exchangerate.host)
+    # USD 기반 환율
     try:
-        symbols = "BYN" if cat=="economic" else "EUR,JPY,RUB"
-        r = requests.get(f"https://api.exchangerate.host/latest?base=USD&symbols={symbols}",
-                         timeout=10).json()
+        if cat == "economic":
+            symbols = "BYN"
+        else:
+            symbols = "EUR,JPY,RUB"
+        r = requests.get(
+            f"https://api.exchangerate.host/latest?base=USD&symbols={symbols}",
+            timeout=10
+        ).json()
         rates = r.get("rates", {})
         if "BYN" in rates:
             snippets.append(f"• USD/BYN: {rates['BYN']:.4f}")
         else:
-            snippets.append(f"• USD/EUR: {rates.get('EUR',0):.3f}, USD/JPY: {rates.get('JPY',0):.1f}, USD/RUB: {rates.get('RUB',0):.2f}")
+            eur = rates.get("EUR", 0)
+            jpy = rates.get("JPY", 0)
+            rub = rates.get("RUB", 0)
+            snippets.append(f"• USD/EUR: {eur:.3f}, USD/JPY: {jpy:.1f}, USD/RUB: {rub:.2f}")
+    except:
+        pass
+
+    # KRW → BYN 환율 (추가)
+    try:
+        krw = requests.get(
+            "https://api.exchangerate.host/latest?base=KRW&symbols=BYN",
+            timeout=10
+        ).json().get("rates", {}).get("BYN")
+        if krw:
+            snippets.append(f"• KRW/BYN: {krw:.4f}")
     except:
         pass
 
@@ -140,6 +159,7 @@ STYLE_GUIDE = textwrap.dedent("""
 
 <h3>📊 최신 데이터</h3>
 <ul>
+  <li>• 실시간 KRW/BYN: {krw_byn:.4f}</li>
   <li>• 외부 API 기반 환율·헤드라인 등 4~6줄</li>
   <li>• …</li>
   <li>• …</li>
