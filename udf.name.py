@@ -80,65 +80,52 @@ def parse(url):
         "cat":   cat
     }
 
-# ────────── 카테고리별 외부 데이터 수집 (RSS 파싱·KRW→BYN 추가 개선) ──────────
+# ────────── 카테고리별 외외 데이터 수집 (순서 변경) ──────────
 def build_brief(cat: str, headline: str) -> str:
     snippets = []
 
-    # 1) 로이터 RU 비즈 헤드라인 2건 (<item> 안의 <title>)
+    # 1) 필수 환율 3종 (USD/BYN, EUR/BYN, KRW/BYN)
+    def get_rate(base: str, symbol: str):
+        try:
+            data = requests.get(
+                f"https://api.exchangerate.host/latest?base={base}&symbols={symbol}",
+                timeout=10
+            ).json()
+            return data.get("rates", {}).get(symbol)
+        except:
+            return None
+
+    for base, sym in [("USD", "BYN"), ("EUR", "BYN"), ("KRW", "BYN")]:
+        rate = get_rate(base, sym)
+        if rate is not None:
+            snippets.append(f"• {base}/{sym} 환율: {rate:.4f}")
+        else:
+            snippets.append(f"• {base}/{sym} 환율: 데이터 없음")
+
+    # 2) BBC World 헤드라인 1건 (비경제 카테고리만)
+    if cat != "economic":
+        try:
+            bbc_rss = requests.get("https://feeds.bbci.co.uk/news/world/rss.xml", timeout=10).text
+            root = ET.fromstring(bbc_rss)
+            first = root.find(".//item/title")
+            if first is not None and first.text:
+                snippets.append(f"• BBC 헤드라인: {first.text.strip()}")
+        except:
+            pass
+
+    # 3) 로이터 RU 비즈 헤드라인 2건
     try:
         rss = requests.get("https://www.reuters.com/rssFeed/ru/businessNews", timeout=10).text
         root = ET.fromstring(rss)
         items = root.findall(".//item")
         for item in items[:2]:
-            t = item.find("title")
-            if t is not None and t.text:
-                snippets.append(f"• 로이터: {t.text.strip()}")
-    except Exception:
+            t = item.findtext("title")
+            if t:
+                snippets.append(f"• 로이터: {t.strip()}")
+    except:
         pass
 
-    # 2) USD 기반 환율 (BYN 또는 그 외)
-    try:
-        symbols = "BYN" if cat == "economic" else "EUR,JPY,RUB"
-        data = requests.get(
-            f"https://api.exchangerate.host/latest?base=USD&symbols={symbols}",
-            timeout=10
-        ).json()
-        rates = data.get("rates", {})
-        if "BYN" in rates:
-            snippets.append(f"• USD/BYN 환율: {rates['BYN']:.4f}")
-        else:
-            eur = rates.get("EUR", 0)
-            jpy = rates.get("JPY", 0)
-            rub = rates.get("RUB", 0)
-            snippets.append(f"• USD/EUR 환율: {eur:.3f}, USD/JPY 환율: {jpy:.1f}, USD/RUB 환율: {rub:.2f}")
-    except Exception:
-        pass
-
-    # 3) KRW → BYN 환율 추가
-    try:
-        krw_data = requests.get(
-            "https://api.exchangerate.host/latest?base=KRW&symbols=BYN",
-            timeout=10
-        ).json()
-        krw_rate = krw_data.get("rates", {}).get("BYN")
-        if krw_rate:
-            snippets.append(f"• KRW/BYN 환율: {krw_rate:.4f}")
-    except Exception:
-        pass
-
-    # 4) BBC World 헤드라인 1건 (비경제 카테고리)
-    if cat != "economic":
-        try:
-            bbc_rss = requests.get("https://feeds.bbci.co.uk/news/world/rss.xml", timeout=10).text
-            root = ET.fromstring(bbc_rss)
-            item = root.find(".//item")
-            t = item.find("title") if item is not None else None
-            if t is not None and t.text:
-                snippets.append(f"• BBC 헤드라인: {t.text.strip()}")
-        except Exception:
-            pass
-
-    # 5) 키워드
+    # 4) 주요 키워드
     snippets.append(f"• 주요 키워드: {headline.strip()[:60]}")
 
     return "\n".join(snippets)
