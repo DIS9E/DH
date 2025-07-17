@@ -192,14 +192,13 @@ def rewrite(article):
     views = random.randint(7_000, 12_000)
     tags_placeholder = ""
 
-    # 1) extra_context 문자열을 <li> 태그로 감싸서 meta_items 생성
+    # ─── prompt_body 조립 ──────────
     meta_items = "\n".join(f"<li>{line}</li>" for line in extra.split("\n"))
 
-    # 2) STYLE_GUIDE의 ⟪META_DATA⟫를 교체하고 본문+extra_context를 이어붙입니다.
     prompt_body = (
         STYLE_GUIDE.format(
             emoji="📰",
-            title=article['title'],
+            title=article["title"],
             date=today,
             views=views,
             tags=tags_placeholder
@@ -208,7 +207,7 @@ def rewrite(article):
         + f"""
 
 원문:
-{article['html']}
+{article["html"]}
 
 extra_context:
 {extra}
