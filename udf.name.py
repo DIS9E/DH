@@ -185,7 +185,7 @@ STYLE_GUIDE = textwrap.dedent("""
 <p class="related"></p>
 """).strip()
 
-- # ─── prompt_body 조립 ──────────
+# ─── prompt_body 조립 ──────────
 - meta_items = "\n".join(f"<li>{line}</li>" for line in extra.split("\n"))
 -
 - # 1) STYLE_GUIDE에 변수 채우기
