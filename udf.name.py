@@ -15,6 +15,7 @@ import xml.etree.ElementTree as ET
 import requests
 import feedparser
 from bs4 import BeautifulSoup
+from requests.exceptions import RequestException
 
 # ────────── 환경 변수 ──────────
 WP_URL      = os.getenv("WP_URL", "https://belatri.info").rstrip("/")
@@ -59,12 +60,19 @@ def fetch_links():
 
 # ────────── 기사 파싱 ──────────
 def parse(url):
-    r = requests.get(url, headers=HEADERS, timeout=10)
-    if not r.ok: return None
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=10)
+        r.raise_for_status()
+    except RequestException as e:
+        logging.warning("파싱 실패(%s): %s", url, e)
+        return None
+
     s = BeautifulSoup(r.text, "html.parser")
     t = s.find("h1", class_="newtitle")
     b = s.find("div", id="zooming")
-    if not (t and b): return None
+    if not (t and b):
+        return None
+
     img = s.find("img", class_="lazy") or s.find("img")
     src = None
     if img:
@@ -82,11 +90,10 @@ def parse(url):
     }
 
 # ────────── 외부 데이터 수집 ──────────
-
 def build_brief(cat: str, headline: str) -> str:
     snippets = []
 
-    # 1) BYN 기준으로 각 통화 한번에 불러오기
+    # 1) BYN 기준으로 각 통화 한 번에 불러오기
     try:
         resp = requests.get(
             "https://api.exchangerate.host/latest",
@@ -107,16 +114,16 @@ def build_brief(cat: str, headline: str) -> str:
         if krw is not None:
             snippets.append(f"• 🇰🇷 1,000원 = {1000/krw:.4f} BYN")
     except Exception:
-        # 오류가 나면 환율 항목을 아예 추가하지 않습니다.
+        # 환율 수집 실패 시, 아무 항목도 추가하지 않습니다.
         pass
 
-    # 2) BBC 헤드라인
+    # 2) BBC World 헤드라인 1건
     if cat != "economic":
         try:
             dp = feedparser.parse("https://feeds.bbci.co.uk/news/world/rss.xml")
             title = dp.entries[0].title.strip()
             snippets.append(f"• 🇬🇧 BBC 헤드라인: {title}")
-        except:
+        except Exception:
             snippets.append("• 🇬🇧 BBC 헤드라인: 데이터 없음")
 
     # 3) 주요 키워드
@@ -210,12 +217,11 @@ extra_context:
                 "– 무례하거나 부적절한 표현은 절대 쓰지 마세요.\n"
                 "– 정책에 민감한 제안이나 부적절한 표현도 포함하지 마세요.\n\n"
                 "**📊 최신 데이터 섹션에는 반드시 다음 6개 항목을 순서대로 `<li>`로 모두 나열해야 합니다:**\n"
-                "    1) USD/BYN 환율\n"
-                "    2) EUR/BYN 환율\n"
-                "    3) KRW/BYN 환율\n"
-                "    4) BBC World 헤드라인 1건\n"
-                "    5) Reuters RU 비즈니스 헤드라인 2건\n"
-                "    6) 주요 키워드\n\n"
+                "    1) 🇺🇸 USD/BYN 환율\n"
+                "    2) 🇪🇺 EUR/BYN 환율\n"
+                "    3) 🇰🇷 KRW/BYN 환율\n"
+                "    4) 🇬🇧 BBC 헤드라인 1건\n"
+                "    5) 🌐 주요 키워드\n\n"
                 "**※ 반드시 STYLE_GUIDE 순서대로 아래 헤더 블록을 모두 포함해야 합니다.**\n"
                 "    - `<h1>…</h1>`\n"
                 "    - `<small>…</small>`\n"
