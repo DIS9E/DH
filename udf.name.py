@@ -79,7 +79,6 @@ def parse(url):
         "url":   url,
         "cat":   cat
     }
-
 # ────────── 카테고리별 외부 데이터 수집 (KRW→BYN 추가) ──────────
 def build_brief(cat: str, headline: str) -> str:
     snippets = []
@@ -94,10 +93,7 @@ def build_brief(cat: str, headline: str) -> str:
 
     # USD 기반 환율
     try:
-        if cat == "economic":
-            symbols = "BYN"
-        else:
-            symbols = "EUR,JPY,RUB"
+        symbols = "BYN" if cat == "economic" else "EUR,JPY,RUB"
         r = requests.get(
             f"https://api.exchangerate.host/latest?base=USD&symbols={symbols}",
             timeout=10
@@ -136,11 +132,6 @@ def build_brief(cat: str, headline: str) -> str:
     snippets.append(f"• 헤드라인 키워드: {headline[:60]}")
     return "\n".join(snippets)
 
-# ────────── 작성 규칙 (헤드라이트 스타일) ──────────
-# • 반드시 HTML 태그만 사용(코드블록·백틱 X)
-# • **원문 문장을 하나도 빼지 말고** 어순·어휘만 자연스럽게 바꿀 것
-# • 톤: ‘헤드라이트’ 뉴스레터처럼 친근한 대화체 + 질문·감탄
-# • 제목은 45자↓ 한국어 · 기사 분위기에 맞는 이모지 1–3개
 
 # ────────── 스타일 가이드 ──────────
 STYLE_GUIDE = textwrap.dedent("""
@@ -159,7 +150,6 @@ STYLE_GUIDE = textwrap.dedent("""
 
 <h3>📊 최신 데이터</h3>
 <ul>
-  <li>• 실시간 KRW/BYN: {krw_byn:.4f}</li>
   <li>• 외부 API 기반 환율·헤드라인 등 4~6줄</li>
   <li>• …</li>
   <li>• …</li>
