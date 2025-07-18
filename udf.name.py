@@ -53,10 +53,19 @@ def sync_seen(seen):
 
 # ────────── 링크 크롤링 ──────────
 def fetch_links():
-    html = requests.get(UDF_BASE, headers=HEADERS, timeout=10).text
+    try:
+        resp = requests.get(UDF_BASE, headers=HEADERS, timeout=15)  # 타임아웃 15초로 연장
+        resp.raise_for_status()
+        html = resp.text
+    except RequestException as e:
+        logging.warning("링크 크롤링 실패: %s", e)
+        return []  # 실패 시 빈 리스트 반환
+
     soup = BeautifulSoup(html, "html.parser")
-    return list({norm(urljoin(UDF_BASE, a["href"]))
-                 for a in soup.select("div.article1 div.article_title_news a[href]")})
+    return list({
+        norm(urljoin(UDF_BASE, a["href"]))
+        for a in soup.select("div.article1 div.article_title_news a[href]")
+    })
 
 # ────────── 기사 파싱 ──────────
 def parse(url):
@@ -224,6 +233,9 @@ extra_context:
                 "  5) 🌐 주요 키워드\n\n"
                 "– **환율이나 헤드라인이 없으면 해당 줄 자체를 생략하세요.**\n"
                 "– 반드시 `<ul>…</ul>` 안에 `<li>`로만 나열해야 합니다.\n"
+                "**❓ Q&A 섹션 지침**\n"
+                "– Q1, Q2, Q3 모두에 각각 ‘A.’ 답변을 1~2문장 이상 포함해야 합니다.\n"
+                "– 답변은 분석과 전망을 담아 구체적으로 작성하세요.\n\n"
                 "**※ 반드시 STYLE_GUIDE 순서대로 아래 헤더 블록을 모두 포함해야 합니다.**\n"
                 "    - `<h1>…</h1>`\n"
                 "    - `<small>…</small>`\n"
