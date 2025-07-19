@@ -166,11 +166,7 @@ STYLE_GUIDE = textwrap.dedent("""
 <p>두 번째 단락: 시나리오·전망 포함 4문장 이상</p>
 
 <h3>❓ Q&A</h3>
-<ul>
-  <li><strong>Q1.</strong> …?<br><strong>A.</strong> 2문장 이상, 분석·전망 포함</li>
-  <li><strong>Q2.</strong> …?</li>
-  <li><strong>Q3.</strong> …?</li>
-</ul>
+[gpt_related_qna]
 
 <p>🏷️ 태그: {tags}</p>
 <p>출처: UDF.name 원문<br>
