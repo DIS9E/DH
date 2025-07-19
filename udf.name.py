@@ -165,7 +165,6 @@ STYLE_GUIDE = textwrap.dedent("""
 <p>첫 번째 단락: 구체적 근거·숫자 포함 4문장 이상</p>
 <p>두 번째 단락: 시나리오·전망 포함 4문장 이상</p>
 
-<h3>❓ Q&A</h3>
 [gpt_related_qna]
 
 <p>🏷️ 태그: {tags}</p>
