@@ -95,24 +95,24 @@ def parse(url):
         "cat":   cat
     }
 
-# ===================== ❶ dynamic_bullets() 교체 =====================
+# ────────── 외부 데이터 수집 ──────────
 def dynamic_bullets(title: str, html: str) -> str:
     """
     기사 주제와 직결된 ‘📊 최신 데이터’ 5줄 반환
-      • 이모지 1개 + 설명 + 숫자/기간 + (출처: …, 연도) 형식
-      • 숫자만 나열 X → 맥락 설명 필수
-      • 기사와 무관한 데이터 금지, 불확실 시 해당 줄 생략
+      • [이모지] 설명: 숫자/기간/비율 (출처: …, 연도)
+      • 숫자만 나열 X → 한 문장 맥락 필수
+      • 기사와 무관한 항목·출처 불명 항목은 작성 금지
     """
     sys_prompt = (
-        "너는 데이터 저널리스트야. 아래 기사 제목·본문을 읽고 "
-        "기사와 관련된 *추가 데이터* 5줄을 작성해. 형식:\n"
-        "• [이모지] 간결한 설명: 숫자·기간/비율 (출처: 기관·언론, 연도)\n"
+        "너는 데이터 저널리스트야. 아래 기사 제목과 본문을 참고해 "
+        "해당 주제와 직접 관련된 ‘추가 데이터’ 5줄을 작성해. 형식은:\n"
+        "• [이모지] 간결한 설명: 숫자·기간/비율 (출처: 기관·언론, 연도)\n\n"
         "규칙:\n"
         "1) 각 줄 45자 이내.\n"
-        "2) 숫자/기간/비율 필수. 단순 건수 나열 금지.\n"
-        "3) 서로 다른 근거·출처 사용 권장.\n"
-        "4) 출처를 모르면 해당 항목 작성 금지.\n"
-        "5) 최대 5줄, 부족하면 가능한 만큼만."
+        "2) 숫자·기간·비율 필수, 단순 건수 나열 금지.\n"
+        "3) 서로 다른 출처 사용 권장, 출처 불명 시 그 줄 생략.\n"
+        "4) 최대 5줄, 부족하면 가능한 만큼만.\n"
+        "5) 기사와 무관한 데이터 넣지 말 것."
     )
     user_prompt = f"<제목>\n{title}\n\n<본문 일부>\n{html[:3500]}"
     headers = {"Authorization": f"Bearer {OPEN_KEY}", "Content-Type": "application/json"}
@@ -136,7 +136,13 @@ def dynamic_bullets(title: str, html: str) -> str:
     except Exception as e:
         logging.warning("📊 데이터 생성 실패: %s", e)
         return "<li>데이터 부족</li>"
-
+        
+def build_brief(cat_unused: str, headline: str, raw_html: str | None = None) -> str:
+    """
+    rewrite() 호출 호환용 래퍼. cat 인자는 더 이상 사용하지 않음.
+    """
+    return dynamic_bullets(headline, raw_html or "")
+    
 # ────────── 스타일 가이드 ──────────
 STYLE_GUIDE = textwrap.dedent("""
 <h1>{title}</h1>
@@ -200,12 +206,12 @@ def rewrite(article):
         {
             "role": "system",
             "content": (
-                "◆ STYLE_GUIDE 헤더 순서를 *절대* 변형하지 말 것.\n"
-                "◆ ‘📊 최신 데이터’는 이미 <li>…</li> 형태로 META_DATA에 주어지니 "
-                "추가·삭제하지 말고 그대로 삽입하라.\n"
-                "◆ 톤: 헤드라이트. 친근한 ‘~요/죠’, 질문·감탄어 섞기. "
+                "◆ STYLE_GUIDE 헤더 순서를 절대 변형하지 말 것.\n"
+                "◆ ⟪META_DATA⟫ 위치에는 build_brief()가 제공한 <li>…</li> "
+                "블록을 그대로 사용하라—추가·삭제 금지.\n"
+                "◆ 톤: 헤드라이트. 친근한 ‘~요/죠’, 질문·감탄어 혼용, "
                 "무례·정책 민감 표현 금지.\n"
-                "◆ `[gpt_related_qna]` 숏코드를 Q&A 섹션으로 그대로 남길 것."
+                "◆ Q&A 섹션은 `[gpt_related_qna]` 숏코드 그대로 남겨둔다."
             )
         },
         {"role": "user", "content": prompt_body}
