@@ -95,19 +95,26 @@ def parse(url):
         "cat":   cat
     }
 
-# ────────── 외부 데이터 수집 ──────────
+# ===================== ❶ dynamic_bullets() 교체 =====================
 def dynamic_bullets(title: str, html: str) -> str:
     """
-    기사 내용을 바탕으로 '📊 최신 데이터' 5줄을 생성한다.
-    • 숫자·통계·기간·비율·건수 등 구체적 값 포함
-    • 각 줄 끝에 (출처: …) 형태의 근거 표기
+    기사 주제와 직결된 ‘📊 최신 데이터’ 5줄 반환
+      • 이모지 1개 + 설명 + 숫자/기간 + (출처: …, 연도) 형식
+      • 숫자만 나열 X → 맥락 설명 필수
+      • 기사와 무관한 데이터 금지, 불확실 시 해당 줄 생략
     """
     sys_prompt = (
-        "너는 데이터 저널리스트야. 사용자가 준 기사 제목·본문을 읽고 "
-        "'항목: 숫자 (출처: 기관·언론·연도)' 형식 리스트를 5줄 만들어. "
-        "숫자는 최신 또는 대표 값을 써야 하고, 출처는 반드시 명시해."
+        "너는 데이터 저널리스트야. 아래 기사 제목·본문을 읽고 "
+        "기사와 관련된 *추가 데이터* 5줄을 작성해. 형식:\n"
+        "• [이모지] 간결한 설명: 숫자·기간/비율 (출처: 기관·언론, 연도)\n"
+        "규칙:\n"
+        "1) 각 줄 45자 이내.\n"
+        "2) 숫자/기간/비율 필수. 단순 건수 나열 금지.\n"
+        "3) 서로 다른 근거·출처 사용 권장.\n"
+        "4) 출처를 모르면 해당 항목 작성 금지.\n"
+        "5) 최대 5줄, 부족하면 가능한 만큼만."
     )
-    user_prompt = f"<제목>\n{title}\n\n<본문>\n{html[:4000]}"
+    user_prompt = f"<제목>\n{title}\n\n<본문 일부>\n{html[:3500]}"
     headers = {"Authorization": f"Bearer {OPEN_KEY}", "Content-Type": "application/json"}
     data = {
         "model": "gpt-4o-mini",
@@ -115,27 +122,20 @@ def dynamic_bullets(title: str, html: str) -> str:
             {"role": "system", "content": sys_prompt},
             {"role": "user",   "content": user_prompt}
         ],
-        "temperature": 0.3,
-        "max_tokens": 300
+        "temperature": 0.35,
+        "max_tokens": 320
     }
     try:
         r = requests.post("https://api.openai.com/v1/chat/completions",
                           headers=headers, json=data, timeout=60)
         r.raise_for_status()
-        lines = [ln.strip("• ").strip() for ln in
+        lines = [ln.lstrip("• ").strip() for ln in
                  r.json()["choices"][0]["message"]["content"].splitlines()
                  if ln.strip()]
-        return "\n".join(f"<li>{ln}</li>" for ln in lines[:5])
+        return "\n".join(f"<li>{ln}</li>" for ln in lines[:5]) or "<li>데이터 부족</li>"
     except Exception as e:
-        logging.warning("📊 최신 데이터 생성 실패: %s", e)
-        return "<li>데이터 부족: 수집 불가</li>"
-
-def build_brief(_: str, headline: str, raw_html: str | None = None) -> str:
-    """
-    ⮕ dynamic_bullets() 래퍼. cat 인자는 더 이상 사용하지 않지만
-    기존 호출 호환성을 위해 그대로 둔다.
-    """
-    return dynamic_bullets(headline, raw_html or "")
+        logging.warning("📊 데이터 생성 실패: %s", e)
+        return "<li>데이터 부족</li>"
 
 # ────────── 스타일 가이드 ──────────
 STYLE_GUIDE = textwrap.dedent("""
@@ -200,11 +200,12 @@ def rewrite(article):
         {
             "role": "system",
             "content": (
-                "헤드라이트 톤을 100% 따라야 합니다. 친근한 대화체+질문·감탄어 혼용, "
-                "무례·정책 민감 표현 금지.\n\n"
-                "📊 최신 데이터 섹션은 이미 META_DATA로 제공되므로 **수정하지 마세요.**\n"
-                "❓ Q&A 섹션은 `[gpt_related_qna]` 숏코드로 대체합니다.\n"
-                "STYLE_GUIDE 순서를 반드시 유지하세요."
+                "◆ STYLE_GUIDE 헤더 순서를 *절대* 변형하지 말 것.\n"
+                "◆ ‘📊 최신 데이터’는 이미 <li>…</li> 형태로 META_DATA에 주어지니 "
+                "추가·삭제하지 말고 그대로 삽입하라.\n"
+                "◆ 톤: 헤드라이트. 친근한 ‘~요/죠’, 질문·감탄어 섞기. "
+                "무례·정책 민감 표현 금지.\n"
+                "◆ `[gpt_related_qna]` 숏코드를 Q&A 섹션으로 그대로 남길 것."
             )
         },
         {"role": "user", "content": prompt_body}
