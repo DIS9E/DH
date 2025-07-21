@@ -141,7 +141,17 @@ def build_brief(cat_unused: str, headline: str, raw_html: str | None = None) -> 
     """
     rewrite() 호출 호환용 래퍼. cat 인자는 더 이상 사용하지 않음.
     """
-    return dynamic_bullets(headline, raw_html or "")
+    return dynamic_bullets(headline, raw_html or "")   # ← 함수 종료
+
+# ────────── 출력 검증 ──────────
+REQ_HEADERS = [
+    "<h1>", "<small>", "💡 본문 정리", "✍️ 편집자 주", "📝 개요",
+    "📊 최신 데이터", "💬 전문가 전망", "[gpt_related_qna]", "🏷️ 태그", "출처:"
+]
+
+def validate_blocks(txt: str) -> bool:
+    """필수 헤더·블록이 모두 포함됐는지 검사"""
+    return all(h in txt for h in REQ_HEADERS)
     
 # ────────── 스타일 가이드 ──────────
 STYLE_GUIDE = textwrap.dedent("""
@@ -179,64 +189,49 @@ STYLE_GUIDE = textwrap.dedent("""
 
 # ─── GPT 리라이팅 ──────────
 def rewrite(article):
-    extra = build_brief(article['cat'], article['title'], article['html'])
-    today = datetime.now(tz=ZoneInfo("Asia/Seoul")).strftime("%Y.%m.%d")
-    views = random.randint(7_000, 12_000)
-    tags_placeholder = ""
-
-    # ⮕ 이미 <li>태그 포함이므로 추가 래핑 금지
-    meta_items = extra
+    extra  = build_brief(article['cat'], article['title'], article['html'])
+    today  = datetime.now(tz=ZoneInfo("Asia/Seoul")).strftime("%Y.%m.%d")
+    views  = random.randint(7_000, 12_000)
 
     filled = STYLE_GUIDE.format(
-        emoji="📰",
-        title=article["title"],
-        date=today,
-        views=views,
-        tags=tags_placeholder
+        emoji="📰", title=article["title"], date=today, views=views, tags=""
+    ).replace("⟪RAW_HTML⟫", article["html"]).replace("⟪META_DATA⟫", extra)
+
+    base_system = (
+        "당신은 ‘헤드라이트’ 뉴스레터 편집봇입니다.\n"
+        "◆ STYLE_GUIDE 순서·태그를 1px도 바꾸면 안 됩니다.\n"
+        "◆ <h1> 제목 중복 출력 금지 (이미 포함돼 있음).\n"
+        "◆ 📊 최신 데이터는 그대로 두고 수정/삭제/재정렬 금지.\n"
+        "◆ Q&A는 `[gpt_related_qna]` 그대로 남겨야 합니다.\n"
+        "◆ 남은 영역에 친근한 대화체로 600–800자 보강.\n"
+        "◆ 무례·정책 민감 표현 금지."
     )
 
-    prompt_body = (
-        filled
-        .replace("⟪RAW_HTML⟫", article["html"])
-        .replace("⟪META_DATA⟫", meta_items)
-        + f"\n\n원문:\n{article['html']}\n\nextra_context:\n{extra}"
-    )
+    def gpt_call(temp: float):
+        headers = {"Authorization": f"Bearer {OPEN_KEY}", "Content-Type": "application/json"}
+        data = {
+            "model": "gpt-4o",
+            "messages": [
+                {"role": "system", "content": base_system},
+                {"role": "user",   "content": filled}
+            ],
+            "temperature": temp,
+            "max_tokens": 1800
+        }
+        r = requests.post("https://api.openai.com/v1/chat/completions",
+                          headers=headers, json=data, timeout=90)
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"].strip().replace("**", "")
 
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "◆ STYLE_GUIDE 헤더 순서를 절대 변형하지 말 것.\n"
-                "◆ ⟪META_DATA⟫ 위치에는 build_brief()가 제공한 <li>…</li> "
-                "블록을 그대로 사용하라—추가·삭제 금지.\n"
-                "◆ 톤: 헤드라이트. 친근한 ‘~요/죠’, 질문·감탄어 혼용, "
-                "무례·정책 민감 표현 금지.\n"
-                "◆ Q&A 섹션은 `[gpt_related_qna]` 숏코드 그대로 남겨둔다."
-            )
-        },
-        {"role": "user", "content": prompt_body}
-    ]
+    # 1차 시도
+    txt = gpt_call(0.35)
 
-    headers = {"Authorization": f"Bearer {OPEN_KEY}", "Content-Type": "application/json"}
-    data = {
-        "model": "gpt-4o",
-        "messages": messages,
-        "temperature": 0.4,
-        "max_tokens": 1800
-    }
-
-    r = requests.post("https://api.openai.com/v1/chat/completions",
-                      headers=headers, json=data, timeout=90)
-    r.raise_for_status()
-    txt = r.json()["choices"][0]["message"]["content"].strip().replace("**", "")
-
-    if len(txt) < 1500:
-        logging.info("  ↺ 길이 보강 재-요청")
-        data["temperature"] = 0.6
-        r2 = requests.post("https://api.openai.com/v1/chat/completions",
-                           headers=headers, json=data, timeout=90)
-        r2.raise_for_status()
-        txt = r2.json()["choices"][0]["message"]["content"].strip().replace("**", "")
+    # 필수 블록 누락 시 1회 재시도(toned-down temp)
+    if not validate_blocks(txt):
+        logging.info("  ↺ 구조 누락 → 재요청")
+        txt = gpt_call(0.25)
+        if not validate_blocks(txt):
+            raise ValueError("GPT 구조 미준수")
 
     return txt
 
