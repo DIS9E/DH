@@ -17,6 +17,21 @@ import feedparser
 from bs4 import BeautifulSoup
 from requests.exceptions import RequestException
 
+
+# ────────── 벨라루스 관련성 검사 ──────────
+BELARUS_KEYWORDS = [
+    # 국가·수도·도시
+    "belarus", "беларус", "벨라루스",
+    "минск", "мiнск", "міnsk",
+    "брест", "гродно", "витебск", "могилев", "гомель",
+    # 인물
+    "лукашенко", "lukashenko", "루카셴코"
+]
+
+def is_belarus_related(text: str) -> bool:
+    low = text.lower()
+    return any(k in low for k in BELARUS_KEYWORDS)
+    
 # ────────── 환경 변수 ──────────
 WP_URL      = os.getenv("WP_URL", "https://belatri.info").rstrip("/")
 USER        = os.getenv("WP_USERNAME")
@@ -67,6 +82,7 @@ def fetch_links():
         for a in soup.select("div.article1 div.article_title_news a[href]")
     })
 
+
 # ────────── 기사 파싱 ──────────
 def parse(url):
     try:
@@ -81,6 +97,22 @@ def parse(url):
     b = s.find("div", id="zooming")
     if not (t and b):
         return None
+
+    # ── 1) ‘함께 읽어보세요’·관련기사 블록 제거 ─────────
+    for marker in b.find_all(string=re.compile(
+        r"(Читайте также|Чытайце таксама|함께 읽어보세요)", flags=re.I)):
+        parent = marker.parent
+        for nxt in list(parent.find_all_next()):
+            nxt.decompose()
+        parent.decompose()
+    # ────────────────────────────────────────────────
+
+    # ── 2) 벨라루스 관련 기사 필터 ─────────────────────
+    raw_txt = t.get_text(" ", strip=True) + " " + b.get_text(" ", strip=True)
+    if not is_belarus_related(raw_txt):
+        logging.info("⏭️  비(非)벨라루스 기사 스킵: %s", url)
+        return None
+    # ────────────────────────────────────────────────
 
     img = s.find("img", class_="lazy") or s.find("img")
     src = None
@@ -97,7 +129,6 @@ def parse(url):
         "url":   url,
         "cat":   cat
     }
-    
 
 # ────────── 스타일 가이드 ──────────
 STYLE_GUIDE = textwrap.dedent("""
