@@ -97,49 +97,7 @@ def parse(url):
         "url":   url,
         "cat":   cat
     }
-
-# ────────── 외부 데이터 수집 ──────────
-def build_brief(cat: str, headline: str) -> str:
-    snippets = []
-
-    # 1) BYN 기준으로 각 통화 한 번에 불러오기
-    try:
-        resp = requests.get(
-            "https://api.exchangerate.host/latest",
-            params={"base": "BYN", "symbols": "USD,EUR,KRW"},
-            timeout=10
-        )
-        resp.raise_for_status()
-        rates = resp.json().get("rates", {})
-
-        usd = rates.get("USD")
-        eur = rates.get("EUR")
-        krw = rates.get("KRW")
-
-        if usd is not None:
-            snippets.append(f" 🇺🇸 1달러 = {1/usd:.4f} BYN")
-        if eur is not None:
-            snippets.append(f" 🇪🇺 1유로 = {1/eur:.4f} BYN")
-        if krw is not None:
-            snippets.append(f" 🇰🇷 1,000원 = {1000/krw:.4f} BYN")
-    except Exception:
-        # 환율 수집 실패 시, 아무 항목도 추가하지 않습니다.
-        pass
-
-    # 2) BBC World 헤드라인 1건
-    if cat != "economic":
-        try:
-            dp = feedparser.parse("https://feeds.bbci.co.uk/news/world/rss.xml")
-            title = dp.entries[0].title.strip()
-            snippets.append(f" 🇬🇧 BBC 헤드라인: {title}")
-        except Exception:
-            snippets.append(" 🇬🇧 BBC 헤드라인: 데이터 없음")
-
-    # 3) 주요 키워드
-    snippets.append(f" 🌐 주요 키워드: {headline.strip()[:60]}")
-
-    # <li> 태그로 감싸서 반환
-    return "\n".join(f"<li>{s}</li>" for s in snippets)
+    
 
 # ────────── 스타일 가이드 ──────────
 STYLE_GUIDE = textwrap.dedent("""
@@ -243,7 +201,7 @@ extra_context:
                 "    - `<p>🏷️ 태그: …</p>`\n"
                 "    - `<p>출처: …</p>`\n"
                 "    - `<p class=\"related\"></p>`"
-            )
+            ),
         },
         {
             "role": "user",
