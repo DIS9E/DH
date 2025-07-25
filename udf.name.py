@@ -96,6 +96,7 @@ def parse(url):
     t = s.find("h1", class_="newtitle")
     b = s.find("div", id="zooming")
     if not (t and b):
+        logging.debug("  🔴 구조 불일치 스킵: %s", url)
         return None
 
     # ── 1) ‘함께 읽어보세요’·관련기사 블록 제거 ─────────
@@ -110,14 +111,13 @@ def parse(url):
     # ── 2) 벨라루스 관련 기사 필터 ─────────────────────
     raw_txt = t.get_text(" ", strip=True) + " " + b.get_text(" ", strip=True)
     if not is_belarus_related(raw_txt):
-        logging.info("⏭️  비(非)벨라루스 기사 스킵: %s", url)
+        logging.debug("  🔴 벨라루스 불포함 스킵: %s", url)
         return None
     # ────────────────────────────────────────────────
 
-    # ─── 대표 이미지 추출 (lazyload / srcset / og:image 대응) ───
+    # ─── 3) 대표 이미지 추출 (lazyload / srcset / og:image 대응) ───
     def pick_image(block):
         """<div id="zooming"> 안에서 첫 실제 이미지 URL 반환"""
-        # ① data-* 속성이 달린 <img> 우선
         img = (block.find("img", attrs={"data-src": True}) or
                block.find("img", attrs={"data-lazy-src": True}) or
                block.find("img", attrs={"data-original": True}) or
@@ -151,8 +151,20 @@ def parse(url):
         og = s.find("meta", property="og:image")
         return og["content"] if og and og.get("content") else None
 
-    img_url = pick_image(b)   # ← b == <div id="zooming">
+    img_url = pick_image(b)
+    if not img_url:
+        logging.debug("  ⚠️  대표 이미지 없음: %s", url)
     # ─────────────────────────────────────────────────────────
+
+    cat = url.split("/news/")[1].split("/")[0]
+    return {
+        "title": t.get_text(strip=True),
+        "html":  str(b),
+        "image": img_url,
+        "url":   url,
+        "cat":   cat
+    }
+
 
 # ────────── 스타일 가이드 ──────────
 STYLE_GUIDE = textwrap.dedent("""
