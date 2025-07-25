@@ -114,21 +114,45 @@ def parse(url):
         return None
     # ────────────────────────────────────────────────
 
-    img = s.find("img", class_="lazy") or s.find("img")
-    src = None
-    if img:
-        src = img.get("data-src") or img.get("src")
-        if src and ("placeholder" in src or "default" in src):
-            src = None
-    img_url = urljoin(url, src) if src else None
-    cat = url.split("/news/")[1].split("/")[0]
-    return {
-        "title": t.get_text(strip=True),
-        "html":  str(b),
-        "image": img_url,
-        "url":   url,
-        "cat":   cat
-    }
+    # ─── 대표 이미지 추출 (lazyload / srcset / og:image 대응) ───
+    def pick_image(block):
+        """<div id="zooming"> 안에서 첫 실제 이미지 URL 반환"""
+        # ① data-* 속성이 달린 <img> 우선
+        img = (block.find("img", attrs={"data-src": True}) or
+               block.find("img", attrs={"data-lazy-src": True}) or
+               block.find("img", attrs={"data-original": True}) or
+               block.find("img"))
+        if img:
+            # data-* → src 순서로 검사
+            for attr in ("data-src", "data-lazy-src", "data-original", "src"):
+                src = img.get(attr)
+                if src:
+                    break
+            else:
+                src = None
+
+            # srcset만 있을 때
+            if not src and img.has_attr("srcset"):
+                src = img["srcset"].split()[0]
+
+            # 스킴리스·상대경로 보정
+            if src and src.startswith("//"):
+                src = "https:" + src
+            elif src and src.startswith("/"):
+                src = urljoin(url, src)
+
+            # placeholder·logo 필터
+            if src and re.search(r"(placeholder|logo|default)\.(svg|png|gif)", src, re.I):
+                src = None
+            if src:
+                return src
+
+        # ② 백업: <meta property="og:image">
+        og = s.find("meta", property="og:image")
+        return og["content"] if og and og.get("content") else None
+
+    img_url = pick_image(b)   # ← b == <div id="zooming">
+    # ─────────────────────────────────────────────────────────
 
 # ────────── 스타일 가이드 ──────────
 STYLE_GUIDE = textwrap.dedent("""
