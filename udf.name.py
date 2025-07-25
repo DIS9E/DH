@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-udf.name.py – v1.1 
+udf.name.py – v1.2
 • 원문 100 % 유지 + 카테고리별 외부 데이터 삽입
 • Q&A 답변·내부 링크·출처 앵커·이미지 캡션 자동 보강
 • 제목 한국어 변환 · 중복 헤더 제거 · placeholder 이미지 필터
@@ -181,7 +181,9 @@ def rewrite(article):
     tags_placeholder = ""
 
     # 1) META_DATA 리스트 항목 생성
-    meta_items = "\n".join(f"<li>{line}</li>" for line in extra.split("\n"))
+    # meta_items = "\n".join(f"<li>{line}</li>" for line in extra.split("\n"))
+    # (더 이상 META_DATA 삽입하지 않습니다)
+    meta_items = ""
 
     # 2) STYLE_GUIDE의 플레이스홀더({emoji},{title} 등)만 먼저 채워서 'filled'에 담기
     filled = STYLE_GUIDE.format(
@@ -196,8 +198,16 @@ def rewrite(article):
     prompt_body = (
         filled
         .replace("⟪RAW_HTML⟫", article["html"])
-        .replace("⟪META_DATA⟫", meta_items)
+        # .replace("⟪META_DATA⟫", meta_items)  # 제거
         + f"""
+
+원문:
+{article["html"]}
+
+extra_context:
+{extra}
+"""
+    )
 
 원문:
 {article["html"]}
@@ -218,6 +228,7 @@ extra_context:
                 "– 무례하거나 부적절한 표현은 절대 쓰지 마세요.\n"
                 "– 정책에 민감한 단어나 부적절한 표현도 포함하지 마세요.\n\n"
                 "**📊 최신 데이터 섹션은 숏코드로 대체합니다.**\n"
+                "`[gpt_latest_data]`\n\n"
                 "**❓ Q&A 섹션은 숏코드로 대체합니다.**\n"
                 "`[gpt_related_qna]`\n\n"
                 "**※ 반드시 STYLE_GUIDE 순서대로 아래 헤더 블록을 모두 포함해야 합니다.**\n"
