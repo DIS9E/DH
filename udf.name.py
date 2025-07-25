@@ -167,13 +167,6 @@ extra_context:
 """
     )
 
-원문:
-{article["html"]}
-
-extra_context:
-{extra}
-"""
-    )
 
     # ─── GPT 호출 준비 ──────────
     messages = [
