@@ -133,17 +133,12 @@ STYLE_GUIDE = textwrap.dedent("""
 
 # ─── GPT 리라이팅 (정책 안전 + 메타데이터 삽입) ──────────
 def rewrite(article):
-    extra            = build_brief(article['cat'], article['title'])
+    # extra_context는 더 이상 사용하지 않습니다
     today            = datetime.now(tz=ZoneInfo("Asia/Seoul")).strftime("%Y.%m.%d")
     views            = random.randint(7_000, 12_000)
     tags_placeholder = ""
 
-    # 1) META_DATA 리스트 항목 생성
-    # meta_items = "\n".join(f"<li>{line}</li>" for line in extra.split("\n"))
-    # (더 이상 META_DATA 삽입하지 않습니다)
-    meta_items = ""
-
-    # 2) STYLE_GUIDE의 플레이스홀더({emoji},{title} 등)만 먼저 채워서 'filled'에 담기
+    # STYLE_GUIDE의 플레이스홀더만 채워서 'filled'에 담기
     filled = STYLE_GUIDE.format(
         emoji="📰",
         title=article["title"],
@@ -152,21 +147,16 @@ def rewrite(article):
         tags=tags_placeholder
     )
 
-    # 3) RAW_HTML·META_DATA 플레이스홀더 치환 및 원문/extra_context 덧붙이기
+    # RAW_HTML만 치환하고, extra_context 제거
     prompt_body = (
         filled
         .replace("⟪RAW_HTML⟫", article["html"])
-        # .replace("⟪META_DATA⟫", meta_items)  # 제거
         + f"""
 
 원문:
 {article["html"]}
-
-extra_context:
-{extra}
 """
     )
-
 
     # ─── GPT 호출 준비 ──────────
     messages = [
