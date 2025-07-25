@@ -428,10 +428,11 @@ def publish(article: dict, txt: str, tag_ids: list[int]):
     r = requests.post(POSTS_API, json=payload, auth=(USER, APP_PW), timeout=30)
     logging.info("  ↳ 게시 %s %s", r.status_code, r.json().get("id"))
     r.raise_for_status()
+    
 def main():
     logging.basicConfig(
-        level=logging.INFO,
-        stream=sys.stdout,                        # ← STDERR 대신 STDOUT으로
+        level=logging.DEBUG,                  # <<< DEBUG 로 변경
+        stream=sys.stdout,
         format="%(asctime)s │ %(levelname)s │ %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S"
     )
@@ -445,18 +446,29 @@ def main():
         logging.info("▶ %s", url)
         art = parse(url)
         time.sleep(1)
-        if not art:
-            continue
 
+        # ─── [DEBUG] 파싱 결과 확인 ───────────────────────
+        if art:
+            logging.debug("  🟢 parse OK | 제목: %s | img: %s",
+                          art["title"], art["image"])
+        else:
+            logging.debug("  🔴 parse returned None")
+            continue
+        # ────────────────────────────────────────────────
+
+        # ─── GPT 리라이팅 ────────────────────────────────
         try:
             txt = rewrite(art)
+            logging.debug("  🟢 GPT OK | 길이: %d chars", len(txt))  # <<<
         except Exception as e:
             logging.warning("GPT 오류: %s", e)
             continue
 
+        # ─── 태그 추출 & 게시 ────────────────────────────
         tag_ids = [tid for n in tag_names(txt) if (tid := tag_id(n))]
         try:
             publish(art, txt, tag_ids)
+            logging.debug("  🟢 publish OK")                        # <<<
             seen.add(norm(url))
             save_seen(seen)
         except Exception as e:
