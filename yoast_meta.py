@@ -15,10 +15,10 @@ from slugify import slugify
 from bs4 import BeautifulSoup
 
 # ────────── 환경 변수 ──────────
-WP_URL   = os.getenv("WP_URL", "https://belatri.info").rstrip("/")
-USER     = os.getenv("WP_USERNAME")
-APP_PW   = os.getenv("WP_APP_PASSWORD")
-OPENKEY  = os.getenv("OPENAI_API_KEY")
+WP_URL    = os.getenv("WP_URL", "https://belatri.info").rstrip("/")
+USER      = os.getenv("WP_USERNAME")
+APP_PW    = os.getenv("WP_APP_PASSWORD")
+OPENKEY   = os.getenv("OPENAI_API_KEY")
 POSTS_API = f"{WP_URL}/wp-json/wp/v2/posts"
 
 # ────────── GPT 프롬프트 ──────────
@@ -53,7 +53,7 @@ def _gpt(prompt: str) -> dict:
     }
     data = {
         "model":       "gpt-4o",
-        "messages":    [{"role":"user", "content":prompt}],
+        "messages":    [{"role": "user", "content": prompt}],
         "temperature": 0.4,
         "max_tokens":  400,
     }
@@ -73,9 +73,9 @@ def _gpt(prompt: str) -> dict:
         except (json.JSONDecodeError, ValueError) as e:
             last_err = e
             logging.warning(f"GPT JSON 파싱 실패 (시도 {attempt+1}): {e}")
-            # system 메시지로 “순수 JSON만” 재요청
+            # 순수 JSON만 재요청
             data["messages"].append({
-                "role": "system",
+                "role":    "system",
                 "content": "응답을 순수 JSON 구조로만 다시 보내주세요."
             })
         except Exception as e:
@@ -89,8 +89,7 @@ def generate_meta(article: dict) -> dict:
     article dict → GPT 호출 → 검증·보정된 meta dict 반환
     """
     # 본문 HTML에서 텍스트 추출 후 600자 샘플
-    text    = BeautifulSoup(article["html"], "html.parser") \
-              .get_text(" ", strip=True)
+    text    = BeautifulSoup(article["html"], "html.parser").get_text(" ", strip=True)
     snippet = re.sub(r"\s+", " ", text)[:600]
 
     prompt = (
@@ -99,10 +98,11 @@ def generate_meta(article: dict) -> dict:
         + f"\n기사 본문 일부: {snippet}"
     )
     meta = _gpt(prompt)
+    logging.debug(f"▶ Generated meta: {meta}")
 
-    # 슬러그 보정: 한국어 소문자+하이픈, 최대 60byte
+    # 슬러그 보정: 한글 소문자+하이픈, 최대 60byte
     meta["slug"] = slugify(
-        meta["slug"],
+        meta.get("slug", ""),
         lowercase=True,
         allow_unicode=True
     )[:60]
@@ -122,9 +122,9 @@ def push_meta(post_id: int, meta: dict):
     payload = {
         "slug": meta["slug"],
         "meta": {
-            "_yoast_wpseo_focuskw":  meta["focus_keyphrase"],
-            "_yoast_wpseo_title":    meta["seo_title"],
-            "_yoast_wpseo_metadesc": meta["meta_description"],
+            "_yoast_wpseo_focuskw":  meta.get("focus_keyphrase", ""),
+            "_yoast_wpseo_title":    meta.get("seo_title", ""),
+            "_yoast_wpseo_metadesc": meta.get("meta_description", ""),
         }
     }
     r = requests.post(
@@ -134,3 +134,4 @@ def push_meta(post_id: int, meta: dict):
         timeout=20
     )
     r.raise_for_status()
+    logging.debug(f"🎯 Yoast PATCH 응답: {r.status_code} {r.json()}")
