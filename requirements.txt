@@ -3,3 +3,6 @@ requests>=2.32
 beautifulsoup4>=4.12
 python-dateutil
 feedparser
+
+python-slugify>=8.0   # 슬러그 한글→로마자 변환
+beautifulsoup4>=4.12  # 기사 HTML에서 텍스트 일부만 추출
