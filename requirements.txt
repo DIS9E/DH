@@ -1,8 +1,6 @@
 openai>=1.2.4
 requests>=2.32
 beautifulsoup4>=4.12
-python-dateutil
-feedparser
-
-python-slugify>=8.0   # 슬러그 한글→로마자 변환
-beautifulsoup4>=4.12  # 기사 HTML에서 텍스트 일부만 추출
+python-dateutil>=2.8.2
+feedparser>=6.0.0
+python-slugify>=8.0
