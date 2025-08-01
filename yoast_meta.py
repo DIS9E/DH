@@ -2,23 +2,23 @@
 # -*- coding: utf-8 -*-
 """
 Yoast SEO 메타데이터 자동화 모듈
-• GPT 호출 → 초점 키프레이즈·SEO 제목·슬러그·메타 설명 JSON 생성
+• GPT 호출 → 초점 키프레이즈·SEO 제목·슬러그·메타 설명 JSON 생성 (재시도 로직 포함)
 • WordPress REST PATCH로 _yoast_wpseo_* 필드 업로드
 """
 
 import os
 import re
 import json
+import logging
 import requests
 from slugify import slugify
 from bs4 import BeautifulSoup
 
 # ────────── 환경 변수 ──────────
-WP_URL  = os.getenv("WP_URL", "https://belatri.info").rstrip("/")
-USER    = os.getenv("WP_USERNAME")
-APP_PW  = os.getenv("WP_APP_PASSWORD")
-OPENKEY = os.getenv("OPENAI_API_KEY")
-
+WP_URL   = os.getenv("WP_URL", "https://belatri.info").rstrip("/")
+USER     = os.getenv("WP_USERNAME")
+APP_PW   = os.getenv("WP_APP_PASSWORD")
+OPENKEY  = os.getenv("OPENAI_API_KEY")
 POSTS_API = f"{WP_URL}/wp-json/wp/v2/posts"
 
 # ────────── GPT 프롬프트 ──────────
@@ -45,36 +45,54 @@ MASTER_PROMPT = """
 }
 """  # ← 닫는 따옴표 3개 꼭!
 
-# ────────── GPT 호출 헬퍼 ──────────
+# ────────── GPT 호출 헬퍼 (2회 재시도 포함) ──────────
 def _gpt(prompt: str) -> dict:
     headers = {
         "Authorization": f"Bearer {OPENKEY}",
-        "Content-Type":  "application/json"
+        "Content-Type":  "application/json",
     }
     data = {
         "model":       "gpt-4o",
-        "messages":    [{"role":"user","content":prompt}],
+        "messages":    [{"role":"user", "content":prompt}],
         "temperature": 0.4,
-        "max_tokens":  400
+        "max_tokens":  400,
     }
-    r = requests.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers=headers, json=data, timeout=60
-    )
-    r.raise_for_status()
-    # 반환된 content는 JSON 문자열이므로 dict로 변환
-    return json.loads(r.json()["choices"][0]["message"]["content"])
+
+    last_err = None
+    for attempt in range(2):
+        try:
+            r = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers=headers, json=data, timeout=60
+            )
+            r.raise_for_status()
+            content = r.json()["choices"][0]["message"]["content"].strip()
+            if not content:
+                raise ValueError("Empty response from GPT")
+            return json.loads(content)
+        except (json.JSONDecodeError, ValueError) as e:
+            last_err = e
+            logging.warning(f"GPT JSON 파싱 실패 (시도 {attempt+1}): {e}")
+            # system 메시지로 “순수 JSON만” 재요청
+            data["messages"].append({
+                "role": "system",
+                "content": "응답을 순수 JSON 구조로만 다시 보내주세요."
+            })
+        except Exception as e:
+            logging.error(f"GPT 호출 오류: {e}")
+            raise
+    raise RuntimeError(f"GPT JSON 파싱 재시도 실패: {last_err}")
 
 # ────────── 메타 JSON 생성 ──────────
 def generate_meta(article: dict) -> dict:
     """
-    article dict를 받아 GPT 호출 → 규격에 맞춘 meta dict 반환
+    article dict → GPT 호출 → 검증·보정된 meta dict 반환
     """
-    # 본문 HTML에서 텍스트만 추출해 600자 샘플 생성
-    text    = BeautifulSoup(article["html"], "html.parser").get_text(" ", strip=True)
+    # 본문 HTML에서 텍스트 추출 후 600자 샘플
+    text    = BeautifulSoup(article["html"], "html.parser") \
+              .get_text(" ", strip=True)
     snippet = re.sub(r"\s+", " ", text)[:600]
 
-    # 프롬프트 조립
     prompt = (
         MASTER_PROMPT
         + f"\n\n기사 제목: {article['title']}"
@@ -82,10 +100,15 @@ def generate_meta(article: dict) -> dict:
     )
     meta = _gpt(prompt)
 
-    # 슬러그 보정: 한글 소문자+하이픈, 최대 60byte
-    meta["slug"] = slugify(meta["slug"], lowercase=True, allow_unicode=True)[:60]
+    # 슬러그 보정: 한국어 소문자+하이픈, 최대 60byte
+    meta["slug"] = slugify(
+        meta["slug"],
+        lowercase=True,
+        allow_unicode=True
+    )[:60]
+
     # 메타설명 길이 보정
-    if len(meta["meta_description"]) > 155:
+    if len(meta.get("meta_description", "")) > 155:
         meta["meta_description"] = meta["meta_description"][:154] + "…"
 
     return meta
@@ -94,14 +117,14 @@ def generate_meta(article: dict) -> dict:
 def push_meta(post_id: int, meta: dict):
     """
     generate_meta() 결과를 받아
-    WordPress REST API로 Yoast 메타 필드 & 슬러그를 업데이트
+    WordPress REST API로 Yoast 필드 + 슬러그 업데이트
     """
     payload = {
         "slug": meta["slug"],
         "meta": {
             "_yoast_wpseo_focuskw":  meta["focus_keyphrase"],
             "_yoast_wpseo_title":    meta["seo_title"],
-            "_yoast_wpseo_metadesc": meta["meta_description"]
+            "_yoast_wpseo_metadesc": meta["meta_description"],
         }
     }
     r = requests.post(
