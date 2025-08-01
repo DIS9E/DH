@@ -8,6 +8,7 @@ udf.name.py – v1.2
 """
 
 import os, sys, re, json, time, logging, random, textwrap
+from yoast_meta import generate_meta, push_meta
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from urllib.parse import urljoin, urlparse, urlunparse
