@@ -65,6 +65,7 @@ MASTER_PROMPT = """
   "slug": "...",                // 한글 기반 슬러그
   "meta_description": "..."     // 140~155자 메타 설명
 }
+"""
 
 # ────────── GPT JSON 보정 헬퍼 ──────────
 def extract_json(raw: str) -> dict:
