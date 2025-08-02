@@ -320,16 +320,26 @@ def korean_title(src: str, context: str) -> str:
         return src
 
 STOP = {"벨라루스","뉴스","기사"}
+
 def tag_names(txt: str) -> list[str]:
+    """
+    GPT 결과에서 ‘🏷️ 태그: …’ 라인을 찾아
+    → 쉼표·스페이스로 1차 분리
+    → sanitize_tags()로 조사·접미사·이모지 제거
+    → STOP 리스트(‘벨라루스’ 등) 제외
+    → 최대 6개 반환
+    """
     m = re.search(r"🏷️\s*태그[^:]*[:：]\s*(.+)", txt)
-    if not m: return []
-    out=[]
-    for t in re.split(r"[,\s]+", m.group(1)):
-        t = t.strip("–-#•")
-        if 1<len(t)<=20 and t not in STOP and t not in out:
-            out.append(t)
-        if len(out)==6: break
-    return out
+    if not m:
+        return []
+
+    # ① 원문에서 쉼표·공백 단위 초벌 분리
+    raw_tags = [t.strip("–-#•") for t in re.split(r"[,\s]+", m.group(1))]
+
+    # ② 조사·접미사·이모지 필터 + 중복 제거
+    cleaned = [t for t in sanitize_tags(raw_tags) if t not in STOP]
+
+    return cleaned[:6]   # 워드프레스 자동 태그 6개 제한
 
 def tag_id(name: str) -> int|None:
     q = requests.get(TAGS_API, params={"search":name,"per_page":1},
