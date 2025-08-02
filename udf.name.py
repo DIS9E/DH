@@ -352,23 +352,23 @@ def sanitize_tags(raw: list[str], max_tags: int = 10) -> list[str]:
     
 def tag_names(txt: str) -> list[str]:
     """
-    GPT 결과에서 ‘🏷️ 태그: …’ 라인을 찾아
-    → 쉼표·스페이스로 1차 분리
+    GPT 결과에서 ‘🏷️ 태그: …’ 한 줄만 추출해
+    → 콤마(,) 기준 분리
     → sanitize_tags()로 조사·접미사·이모지 제거
-    → STOP 리스트(‘벨라루스’ 등) 제외
+    → STOP 리스트 제외
     → 최대 6개 반환
     """
-    m = re.search(r"🏷️\s*태그[^:]*[:：]\s*(.+)", txt)
+    # ① ‘🏷️ 태그:’ 줄만 안전하게 잡기  ─ (< 또는 줄바꿈 전까지만)
+    m = re.search(r"🏷️\s*태그[^:]*[:：]\s*([^<\n]+)", txt)
     if not m:
         return []
 
-    # ① 원문에서 쉼표·공백 단위 초벌 분리
-    raw_tags = [t.strip("–-#•") for t in re.split(r"[,\s]+", m.group(1))]
+    # ② 콤마(,)만 구분자로 사용해 태그 후보 만들기
+    raw_tags = [t.strip("–-#• ") for t in m.group(1).split(",")]
 
-    # ② 조사·접미사·이모지 필터 + 중복 제거
-    cleaned = [t for t in sanitize_tags(raw_tags) if t not in STOP]
-
-    return cleaned[:6]   # 워드프레스 자동 태그 6개 제한
+    # ③ 정제 → STOP 필터 → 최대 6개
+    cleaned = [t for t in sanitize_tags(raw_tags) if t and t not in STOP]
+    return cleaned[:6]
 
 def tag_id(name: str) -> int | None:
     """
