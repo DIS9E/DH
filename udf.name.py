@@ -319,8 +319,30 @@ def korean_title(src: str, context: str) -> str:
     except:
         return src
 
+
 STOP = {"벨라루스","뉴스","기사"}
 
+# ─── 불용어·조사 제거용 상수 ──────────
+_KR_STOP_SUFFIX = (
+    "의", "에", "에서", "에게", "으로", "적으로", "적", "적인"
+)
+_KR_FILTER_CHARS = re.compile(r"[“”\"\'’‘·…\s]+")  # 특수따옴표·공백
+_NUM_EMOJI       = re.compile(r"[0-9️⃣-🔟©®™✳︎✴️💡✨🚫⬆️⬇️🚀]+")
+_VALID_KR_EN     = re.compile(r"[가-힣A-Za-z0-9\-]+")
+
+def sanitize_tags(raw: list[str], max_tags: int = 10) -> list[str]:
+    """쉼표·스페이스로 분리한 태그 후보 → 조사·접미사·이모지·숫자 제거"""
+    clean = []
+    for tag in raw:
+        t = _NUM_EMOJI.sub("", _KR_FILTER_CHARS.sub("", tag)).strip()
+        for suf in _KR_STOP_SUFFIX:
+            if t.endswith(suf):
+                t = t[:-len(suf)]
+        t = "".join(_VALID_KR_EN.findall(t))
+        if 2 <= len(t) <= 15:
+            clean.append(t)
+    return list(dict.fromkeys(clean))[:max_tags]
+    
 def tag_names(txt: str) -> list[str]:
     """
     GPT 결과에서 ‘🏷️ 태그: …’ 라인을 찾아
