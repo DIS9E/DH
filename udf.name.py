@@ -363,12 +363,40 @@ def tag_names(txt: str) -> list[str]:
 
     return cleaned[:6]   # 워드프레스 자동 태그 6개 제한
 
-def tag_id(name: str) -> int|None:
-    q = requests.get(TAGS_API, params={"search":name,"per_page":1},
-                     auth=(USER,APP_PW), timeout=10)
-    if q.ok and q.json(): return q.json()[0]["id"]
-    c = requests.post(TAGS_API, json={"name":name}, auth=(USER,APP_PW), timeout=10)
-    return c.json().get("id") if c.status_code==201 else None
+def tag_id(name: str) -> int | None:
+    """
+    - 정확히 같은 이름(tag)이 이미 있으면 그 ID 사용
+    - 없으면 새로 생성
+    - POST 시 'term_exists' 에러(이미 존재)면 그 term_id 사용
+    """
+    # 1) 같은 이름이 존재하는지 먼저 검색 (여유 있게 100개까지)
+    r = requests.get(
+        TAGS_API,
+        params={"search": name, "per_page": 100},
+        auth=(USER, APP_PW),
+        timeout=10
+    )
+    if r.ok:
+        for term in r.json():
+            if term["name"] == name:        # 정확히 일치하는 이름
+                return term["id"]
+
+    # 2) 없으면 생성 시도
+    c = requests.post(
+        TAGS_API, json={"name": name},
+        auth=(USER, APP_PW), timeout=10
+    )
+
+    # 2-A) 새로 생성된 경우
+    if c.status_code == 201:
+        return c.json().get("id")
+
+    # 2-B) 이미 존재 → WP가 term_exists와 함께 기존 ID 반환
+    if c.status_code == 400 and c.json().get("code") == "term_exists":
+        return c.json()["data"]["term_id"]
+
+    logging.warning("태그 '%s' 처리 실패: %s %s", name, c.status_code, c.text)
+    return None
 
 def ensure_depth(html: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
