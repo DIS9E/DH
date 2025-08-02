@@ -49,24 +49,11 @@ MASTER_PROMPT = """
 
 # ────────── GPT JSON 보정 헬퍼 ──────────
 def extract_json(raw: str) -> dict:
-    """중괄호 레벨(depth)로 제대로 닫히는 JSON 블록을 추출합니다."""
-    raw = raw.strip("`\n ")
-    start = raw.find('{')
-    if start < 0:
-        raise ValueError("JSON 블록 시작을 찾을 수 없습니다.")
-    depth = 0
-    for i, ch in enumerate(raw[start:], start):
-        if ch == '{':
-            depth += 1
-        elif ch == '}':
-            depth -= 1
-            if depth == 0:
-                block = raw[start:i+1]
-                try:
-                    return json.loads(block)
-                except json.JSONDecodeError as e:
-                    raise ValueError(f"JSON 파싱 오류: {e}")
-    raise ValueError("중괄호 블록이 닫히지 않았습니다.")
+    """중괄호로 감싸진 JSON 덩어리만 뽑아냅니다."""
+    m = re.search(r"(\{[\s\S]*\})", raw)
+    if not m:
+        raise ValueError("JSON 블록을 찾을 수 없습니다.")
+    return json.loads(m.group(1))
 
 # ────────── GPT 호출 헬퍼 (재시도 3회) ──────────
 def _gpt(prompt: str) -> dict:
@@ -82,6 +69,7 @@ def _gpt(prompt: str) -> dict:
             {"role": "user",    "content": prompt}
         ]
         if attempt > 0:
+            # 재시도 땐 “순수 JSON만” 요청
             messages.insert(1, {
                 "role": "system",
                 "content": "응답을 순수 JSON 구조로만 다시 보내주세요."
@@ -98,21 +86,21 @@ def _gpt(prompt: str) -> dict:
             },
             timeout=60
         )
-
+        resp.raise_for_status()
+        content = resp.json()["choices"][0]["message"]["content"]
+        # 1) 우선 순수 JSON 직접 파싱
         try:
-            resp.raise_for_status()
-            content = resp.json()["choices"][0]["message"]["content"]
             return json.loads(content)
-        except (json.JSONDecodeError, ValueError):
+        except json.JSONDecodeError:
+            logging.warning(f"직접 JSON 로드 실패, content에서 추출 시도: {content[:30]}...")
+            # 2) content 내 JSON 블록 추출
             try:
-                return extract_json(resp.text)
+                return extract_json(content)
             except Exception as e:
                 last_err = e
-                logging.warning(f"GPT JSON 파싱 실패 (시도 {attempt+1}): {e}")
+                logging.warning(f"content 기반 JSON 추출 실패(시도 {attempt+1}): {e}")
                 time.sleep(1)
-        except Exception as e:
-            logging.error(f"GPT 호출 오류: {e}")
-            raise
+                continue
 
     raise RuntimeError(f"GPT JSON 파싱 재시도 실패: {last_err}")
 
@@ -129,26 +117,28 @@ def generate_meta(article: dict) -> dict:
     meta = _gpt(prompt)
     logging.debug(f"▶ Generated meta: {meta}")
 
-    # 슬러그 보정: ASCII 전용
-    meta["slug"] = slugify(
-        meta.get("slug", ""),
+    # 슬러그 보정 (ASCII 슬러그)
+    meta['slug'] = slugify(
+        meta.get('slug', ''),
         lowercase=True,
         allow_unicode=False
     )[:60]
 
     # 메타설명 길이 보정
     if len(meta.get("meta_description", "")) > 155:
-        meta["meta_description"] = meta["meta_description"][0:154] + "…"
+        meta["meta_description"] = meta["meta_description"][0:154].rstrip() + "…"
 
     return meta
 
 # ────────── WP 태그 동기화 ──────────
 def sync_tags(names: list[str]) -> list[int]:
-    # 1) HTML 태그나 공백 제거
-    clean_names = [re.sub(r"<[^>]+>", "", n).strip() for n in names if re.sub(r"<[^>]+>", "", n).strip()]
+    clean_names = []
+    for n in names:
+        c = re.sub(r"<[^>]+>", "", n).strip()
+        if c:
+            clean_names.append(c)
 
-    # 2) 기존 태그 한 번에 가져오기
-    resp = requests.get(TAGS_API, params={"per_page":100}, auth=(USER, APP_PW), timeout=10)
+    resp = requests.get(TAGS_API, params={"per_page":100})
     resp.raise_for_status()
     existing = {t["name"]: t["id"] for t in resp.json()}
 
@@ -156,33 +146,25 @@ def sync_tags(names: list[str]) -> list[int]:
     for name in clean_names:
         if name in existing:
             ids.append(existing[name])
-            continue
-
-        slug = slugify(name, lowercase=True, allow_unicode=False)
-        try:
-            r = requests.post(
-                TAGS_API,
-                auth=(USER, APP_PW),
-                json={"name": name, "slug": slug},
-                timeout=10
-            )
-            r.raise_for_status()
-            tid = r.json().get("id")
-        except requests.HTTPError as e:
-            logging.warning(f"태그 생성 실패 '{name}': {e}. 이미 존재할 수도 있어요, 다시 검색합니다.")
-            r2 = requests.get(TAGS_API, params={"search": name}, auth=(USER, APP_PW), timeout=10)
-            r2.raise_for_status()
-            tid = r2.json()[0].get("id")
-
-        existing[name] = tid
-        ids.append(tid)
-
+        else:
+            payload = {"name": name, "slug": slugify(name, lowercase=True, allow_unicode=False)}
+            try:
+                r = requests.post(TAGS_API, auth=(USER, APP_PW), json=payload)
+                r.raise_for_status()
+                ids.append(r.json()["id"])
+            except requests.exceptions.HTTPError as e:
+                logging.warning(f"태그 생성 실패 '{name}': {e}. 기존 태그 재조회합니다.")
+                r2 = requests.get(TAGS_API, params={"search": name})
+                if r2.ok and r2.json():
+                    ids.append(r2.json()[0]["id"])
+                else:
+                    logging.error(f"태그 '{name}' 검색에도 실패했습니다.")
     return ids
 
 # ────────── WP 메타 + title, tags PATCH ──────────
 def push_meta(post_id: int, meta: dict):
     payload = {
-        "slug":  meta.get("slug", ""),
+        "slug":  meta["slug"],
         "title": meta.get("title", ""),
         "tags":  sync_tags(meta.get("tags", [])),
         "meta": {
@@ -202,16 +184,16 @@ def push_meta(post_id: int, meta: dict):
 
 # ────────── 예시: 새 글 처리 루프 ──────────
 def main():
-    # 실제 환경에선 여기서 UDF API 를 호출해서 새 글 리스트를 받아오세요.
-    new_posts = fetch_new_posts_from_udf()  # → [{'id':123, 'html':..., 'title':...}, ...]
+    new_posts = fetch_new_posts_from_udf()  # UDF에서 새 글 리스트 호출
     for post in new_posts:
         try:
             meta = generate_meta({"html": post["html"], "title": post["title"]})
             push_meta(post["id"], meta)
-            time.sleep(1)  # rate‐limit 대비
+            time.sleep(1)
         except Exception as e:
             logging.error(f"포스트 {post['id']} 메타 적용 실패: {e}")
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
     main()
+
