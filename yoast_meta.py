@@ -6,6 +6,7 @@ Yoast SEO 메타데이터 자동화 모듈
 • WordPress REST PATCH로 _yoast_wpseo_* 필드 업로드
 """
 
+import time
 import os
 import re
 import json
@@ -45,42 +46,55 @@ MASTER_PROMPT = """
 }
 """  # ← 닫는 따옴표 3개 꼭!
 
-# ────────── GPT 호출 헬퍼 (2회 재시도 포함) ──────────
+# ────────── GPT 호출 헬퍼 (독립 재시도 3회, 메시지 리셋) ──────────
 def _gpt(prompt: str) -> dict:
     headers = {
         "Authorization": f"Bearer {OPENKEY}",
         "Content-Type":  "application/json",
     }
-    data = {
-        "model":       "gpt-4o",
-        "messages":    [{"role": "user", "content": prompt}],
-        "temperature": 0.4,
-        "max_tokens":  400,
-    }
 
     last_err = None
-    for attempt in range(2):
+    for attempt in range(3):
+        # 매번 메시지 리스트를 새로 만듭니다
+        messages = [
+            {"role": "system",  "content": MASTER_PROMPT},
+        ]
+        if attempt > 0:
+            # 재시도 땐 “순수 JSON만” 추가 요청
+            messages.append({
+                "role":    "system",
+                "content": "응답을 순수 JSON 구조로만 다시 보내주세요."
+            })
+        messages.append({"role": "user",    "content": prompt})
+
         try:
             r = requests.post(
                 "https://api.openai.com/v1/chat/completions",
-                headers=headers, json=data, timeout=60
+                headers=headers,
+                json={
+                    "model":       "gpt-4o",
+                    "messages":    messages,
+                    "temperature": 0.4,
+                    "max_tokens":  400,
+                },
+                timeout=60
             )
             r.raise_for_status()
             content = r.json()["choices"][0]["message"]["content"].strip()
             if not content:
                 raise ValueError("Empty response from GPT")
             return json.loads(content)
+
         except (json.JSONDecodeError, ValueError) as e:
             last_err = e
             logging.warning(f"GPT JSON 파싱 실패 (시도 {attempt+1}): {e}")
-            # 순수 JSON만 재요청
-            data["messages"].append({
-                "role":    "system",
-                "content": "응답을 순수 JSON 구조로만 다시 보내주세요."
-            })
+            time.sleep(1)  # 살짝 쉬었다 재시도
+
         except Exception as e:
             logging.error(f"GPT 호출 오류: {e}")
             raise
+
+    # 3회 다 실패하면 예외
     raise RuntimeError(f"GPT JSON 파싱 재시도 실패: {last_err}")
 
 # ────────── 메타 JSON 생성 ──────────
