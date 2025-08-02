@@ -49,9 +49,11 @@ MASTER_PROMPT = """
 
 # ────────── GPT JSON 보정 헬퍼 ──────────
 def extract_json(raw: str) -> dict:
-    """중괄호 범위만 잘라서 JSON 디코드 시도"""
-    m = re.search(r"\{(?:[^{}]|(?R))*\}", raw)
-    return json.loads(m.group(0)) if m else {}
+    """중괄호로 감싸진 JSON 덩어리만 뽑아냅니다."""
+    m = re.search(r"(\{[\s\S]*\})", raw)
+    if not m:
+        raise ValueError("JSON 블록을 찾을 수 없습니다.")
+    return json.loads(m.group(1))
 
 # ────────── GPT 호출 헬퍼 (재시도 3회) ──────────
 def _gpt(prompt: str) -> dict:
@@ -67,6 +69,7 @@ def _gpt(prompt: str) -> dict:
             {"role": "user",    "content": prompt}
         ]
         if attempt > 0:
+            # 재시도 땐 “순수 JSON만” 요청
             messages.insert(1, {
                 "role": "system",
                 "content": "응답을 순수 JSON 구조로만 다시 보내주세요."
@@ -83,12 +86,13 @@ def _gpt(prompt: str) -> dict:
             },
             timeout=60
         )
+
         try:
             resp.raise_for_status()
-            content = resp.json()["choices"][0]["message"]["content"].strip()
+            content = resp.json()["choices"][0]["message"]["content"]
             return json.loads(content)
         except (json.JSONDecodeError, ValueError):
-            # 순수 JSON 아닐 경우, 중괄호만 뽑아서 다시 파싱
+            # 순수 JSON 아니면, raw text 에서 뽑아보기
             try:
                 return extract_json(resp.text)
             except Exception as e:
@@ -129,16 +133,39 @@ def generate_meta(article: dict) -> dict:
 
 # ────────── WP 태그 동기화 ──────────
 def sync_tags(names: list[str]) -> list[int]:
-    # 기존 태그 조회
-    existing = {t["name"]: t["id"] for t in requests.get(TAGS_API, params={"per_page":100}).json()}
+    # 1) HTML 태그나 공백, 특수문자 제거
+    clean_names = []
+    for n in names:
+        # <...> 지우고 양쪽 공백 제거
+        c = re.sub(r"<[^>]+>", "", n).strip()
+        if c:
+            clean_names.append(c)
+
+    # 2) 기존 태그 가져오기
+    resp = requests.get(TAGS_API, params={"per_page":100})
+    resp.raise_for_status()
+    existing = {t["name"]: t["id"] for t in resp.json()}
+
     ids = []
-    for name in names:
+    for name in clean_names:
+        slug = slugify(name, lowercase=True, allow_unicode=True)
         if name in existing:
             ids.append(existing[name])
         else:
-            r = requests.post(TAGS_API, auth=(USER, APP_PW), json={"name": name})
-            r.raise_for_status()
-            ids.append(r.json()["id"])
+            payload = {"name": name, "slug": slug}
+            try:
+                r = requests.post(TAGS_API, auth=(USER, APP_PW), json=payload)
+                r.raise_for_status()
+                tags_id = r.json()["id"]
+                ids.append(tags_id)
+            except requests.exceptions.HTTPError as e:
+                logging.warning(f"태그 생성 실패 '{name}': {e}. 이미 존재할 수도 있어요, 다시 검색합니다.")
+                # 이미 존재해서 400 뜨는 거면, 다시 검색해서 ID 가져오기
+                r2 = requests.get(TAGS_API, params={"search": name})
+                if r2.ok and r2.json():
+                    ids.append(r2.json()[0]["id"])
+                else:
+                    logging.error(f"태그 '{name}' 검색에도 실패했습니다.")
     return ids
 
 # ────────── WP 메타 + title, tags PATCH ──────────
@@ -164,13 +191,13 @@ def push_meta(post_id: int, meta: dict):
 
 # ────────── 예시: 새 글 처리 루프 ──────────
 def main():
-    # (여기에 실제로 UDF에서 새 글 리스트 가져오는 로직을 넣으세요)
+    # 실제 환경에선 여기서 UDF API 를 호출해서 새 글 리스트를 받아오세요.
     new_posts = fetch_new_posts_from_udf()  # → [{'id':123, 'html':..., 'title':...}, ...]
     for post in new_posts:
         try:
             meta = generate_meta({"html": post["html"], "title": post["title"]})
             push_meta(post["id"], meta)
-            time.sleep(1)  # API rate limit 대비
+            time.sleep(1)  # rate‐limit 대비
         except Exception as e:
             logging.error(f"포스트 {post['id']} 메타 적용 실패: {e}")
 
