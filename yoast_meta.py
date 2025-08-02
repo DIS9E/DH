@@ -65,7 +65,7 @@ def _gpt(prompt: str) -> dict:
                 "role":    "system",
                 "content": "응답을 순수 JSON 구조로만 다시 보내주세요."
             })
-        messages.append({"role": "user",    "content": prompt})
+        messages.append({"role": "user", "content": prompt})
 
         try:
             r = requests.post(
