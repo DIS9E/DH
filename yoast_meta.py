@@ -3,7 +3,7 @@
 """
 Yoast SEO 메타데이터 자동화 모듈
 • GPT 호출 → 초점 키프레이즈·SEO 제목·슬러그·메타 설명 JSON 생성 (재시도 로직 포함)
-• WordPress REST PATCH로 _yoast_wpseo_* 필드 업로드
+• WordPress REST PATCH로 _yoast_wpseo_* 필드 + title, tags 업로드
 """
 
 import time
@@ -21,6 +21,7 @@ USER      = os.getenv("WP_USERNAME")
 APP_PW    = os.getenv("WP_APP_PASSWORD")
 OPENKEY   = os.getenv("OPENAI_API_KEY")
 POSTS_API = f"{WP_URL}/wp-json/wp/v2/posts"
+TAGS_API  = f"{WP_URL}/wp-json/wp/v2/tags"
 
 # ────────── GPT 프롬프트 ──────────
 MASTER_PROMPT = """
@@ -44,65 +45,64 @@ MASTER_PROMPT = """
   "slug": "...",
   "meta_description": "..."
 }
-"""  # ← 닫는 따옴표 3개 꼭!
+"""
 
-# ────────── GPT 호출 헬퍼 (독립 재시도 3회, 메시지 리셋) ──────────
+# ────────── GPT JSON 보정 헬퍼 ──────────
+def extract_json(raw: str) -> dict:
+    """중괄호 범위만 잘라서 JSON 디코드 시도"""
+    m = re.search(r"\{(?:[^{}]|(?R))*\}", raw)
+    return json.loads(m.group(0)) if m else {}
+
+# ────────── GPT 호출 헬퍼 (재시도 3회) ──────────
 def _gpt(prompt: str) -> dict:
     headers = {
         "Authorization": f"Bearer {OPENKEY}",
         "Content-Type":  "application/json",
     }
-
     last_err = None
+
     for attempt in range(3):
-        # 매번 메시지 리스트를 새로 만듭니다
         messages = [
             {"role": "system",  "content": MASTER_PROMPT},
+            {"role": "user",    "content": prompt}
         ]
         if attempt > 0:
-            # 재시도 땐 “순수 JSON만” 추가 요청
-            messages.append({
-                "role":    "system",
+            messages.insert(1, {
+                "role": "system",
                 "content": "응답을 순수 JSON 구조로만 다시 보내주세요."
             })
-        messages.append({"role": "user", "content": prompt})
 
+        resp = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers,
+            json={
+                "model":       "gpt-4o",
+                "messages":    messages,
+                "temperature": 0.4,
+                "max_tokens":  400,
+            },
+            timeout=60
+        )
         try:
-            r = requests.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers=headers,
-                json={
-                    "model":       "gpt-4o",
-                    "messages":    messages,
-                    "temperature": 0.4,
-                    "max_tokens":  400,
-                },
-                timeout=60
-            )
-            r.raise_for_status()
-            content = r.json()["choices"][0]["message"]["content"].strip()
-            if not content:
-                raise ValueError("Empty response from GPT")
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"].strip()
             return json.loads(content)
-
-        except (json.JSONDecodeError, ValueError) as e:
-            last_err = e
-            logging.warning(f"GPT JSON 파싱 실패 (시도 {attempt+1}): {e}")
-            time.sleep(1)  # 살짝 쉬었다 재시도
-
+        except (json.JSONDecodeError, ValueError):
+            # 순수 JSON 아닐 경우, 중괄호만 뽑아서 다시 파싱
+            try:
+                return extract_json(resp.text)
+            except Exception as e:
+                last_err = e
+                logging.warning(f"GPT JSON 파싱 실패 (시도 {attempt+1}): {e}")
+                time.sleep(1)
         except Exception as e:
             logging.error(f"GPT 호출 오류: {e}")
             raise
 
-    # 3회 다 실패하면 예외
     raise RuntimeError(f"GPT JSON 파싱 재시도 실패: {last_err}")
 
 # ────────── 메타 JSON 생성 ──────────
 def generate_meta(article: dict) -> dict:
-    """
-    article dict → GPT 호출 → 검증·보정된 meta dict 반환
-    """
-    # 본문 HTML에서 텍스트 추출 후 600자 샘플
     text    = BeautifulSoup(article["html"], "html.parser").get_text(" ", strip=True)
     snippet = re.sub(r"\s+", " ", text)[:600]
 
@@ -114,7 +114,7 @@ def generate_meta(article: dict) -> dict:
     meta = _gpt(prompt)
     logging.debug(f"▶ Generated meta: {meta}")
 
-    # 슬러그 보정: 한글 소문자+하이픈, 최대 60byte
+    # 슬러그 보정
     meta["slug"] = slugify(
         meta.get("slug", ""),
         lowercase=True,
@@ -127,14 +127,26 @@ def generate_meta(article: dict) -> dict:
 
     return meta
 
-# ────────── WP 메타 PATCH ──────────
+# ────────── WP 태그 동기화 ──────────
+def sync_tags(names: list[str]) -> list[int]:
+    # 기존 태그 조회
+    existing = {t["name"]: t["id"] for t in requests.get(TAGS_API, params={"per_page":100}).json()}
+    ids = []
+    for name in names:
+        if name in existing:
+            ids.append(existing[name])
+        else:
+            r = requests.post(TAGS_API, auth=(USER, APP_PW), json={"name": name})
+            r.raise_for_status()
+            ids.append(r.json()["id"])
+    return ids
+
+# ────────── WP 메타 + title, tags PATCH ──────────
 def push_meta(post_id: int, meta: dict):
-    """
-    generate_meta() 결과를 받아
-    WordPress REST API로 Yoast 필드 + 슬러그 업데이트
-    """
     payload = {
-        "slug": meta["slug"],
+        "slug":  meta["slug"],
+        "title": meta.get("title", ""),
+        "tags":  sync_tags(meta.get("tags", [])),
         "meta": {
             "_yoast_wpseo_focuskw":  meta.get("focus_keyphrase", ""),
             "_yoast_wpseo_title":    meta.get("seo_title", ""),
@@ -148,4 +160,20 @@ def push_meta(post_id: int, meta: dict):
         timeout=20
     )
     r.raise_for_status()
-    logging.debug(f"🎯 Yoast PATCH 응답: {r.status_code} {r.json()}")
+    logging.debug(f"🎯 Yoast PATCH 응답: {r.status_code}")
+
+# ────────── 예시: 새 글 처리 루프 ──────────
+def main():
+    # (여기에 실제로 UDF에서 새 글 리스트 가져오는 로직을 넣으세요)
+    new_posts = fetch_new_posts_from_udf()  # → [{'id':123, 'html':..., 'title':...}, ...]
+    for post in new_posts:
+        try:
+            meta = generate_meta({"html": post["html"], "title": post["title"]})
+            push_meta(post["id"], meta)
+            time.sleep(1)  # API rate limit 대비
+        except Exception as e:
+            logging.error(f"포스트 {post['id']} 메타 적용 실패: {e}")
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG)
+    main()
