@@ -441,15 +441,24 @@ def publish(article: dict, txt: str, tag_ids: list[int]):
     r = requests.post(POSTS_API, json=payload, auth=(USER, APP_PW), timeout=30)
     logging.info("  ↳ 게시 %s %s", r.status_code, r.json().get("id"))
     r.raise_for_status()
+    
+    # ▶ 디버그 1: publish() 진입 확인
+    logging.debug(f"▶ publish() 성공, 이제 Yoast 메타 자동화 시작(post_id={r.json()['id']})")
 
-    # ★ Yoast SEO 메타데이터 자동 생성 & 업로드
+    # ★ Yoast SEO 메타 자동 생성 & 업로드
     post_id = r.json()["id"]
     try:
-        meta = generate_meta(article)   # GPT가 JSON 만들어 줌
-        push_meta(post_id, meta)        # WP REST API로 패치
+        # ▶ 디버그 2: 메타 생성 호출 직전
+        logging.debug("▶ Calling generate_meta()")
+        meta = generate_meta(article)
+        # ▶ 디버그 3: 메타 생성 결과 확인
+        logging.debug(f"▶ generate_meta() 리턴값: {meta}")
+
+        push_meta(post_id, meta)
         logging.info("  🟢 Yoast 메타 적용 완료")
     except Exception as e:
         logging.warning("Yoast 메타 실패: %s", e)
+
 
 def main():
     logging.basicConfig(
