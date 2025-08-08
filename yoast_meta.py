@@ -151,18 +151,18 @@ def generate_meta(article: dict) -> dict:
 # ────────── WP 태그 동기화 ──────────
 
 def sync_tags(names: list[str]) -> list[int]:
-    # 디버그: 호출 시각, 인증 정보 확인
+    # 디버그: 호출 시각(UTC) 로깅
     logging.debug(f"[sync_tags] 호출 시각(UTC): {datetime.datetime.utcnow().isoformat()}")
-    logging.debug(f"[sync_tags] WP_USERNAME={'SET' if USER else 'NONE'}, WP_APP_PASSWORD={'SET' if APP_PW else 'NONE'}")
+    logging.debug(f"[sync_tags] WP_USERNAME set? {'YES' if USER else 'NO'}, WP_APP_PASSWORD set? {'YES' if APP_PW else 'NO'}")
 
-    # 이름 정제
+    # 입력 태그명 정제
     clean_names = []
     for n in names:
         c = re.sub(r"<[^>]+>", "", n).strip()
         if c:
             clean_names.append(c)
 
-    # 기존 태그 조회 (GET에 auth 추가)
+    # 1) 기존 태그 목록 가져오기 (GET에 auth 추가)
     resp = requests.get(
         TAGS_API,
         params={"per_page": 100},
@@ -176,33 +176,35 @@ def sync_tags(names: list[str]) -> list[int]:
     for name in clean_names:
         if name in existing:
             ids.append(existing[name])
+            continue
+
+        # 2) 새 태그 생성
+        payload = {
+            "name": name,
+            "slug": slugify(name, lowercase=True, allow_unicode=False)
+        }
+        r = requests.post(
+            TAGS_API,
+            auth=(USER, APP_PW),
+            json=payload
+        )
+        logging.debug(f"[sync_tags] POST {TAGS_API} {payload} → {r.status_code}")
+        if r.ok:
+            ids.append(r.json()["id"])
+            continue
+
+        # 3) 생성 실패 시 검색으로 재조회
+        logging.warning(f"[sync_tags] 태그 생성 실패 '{name}': {r.status_code}. 재조회 시도")
+        r2 = requests.get(
+            TAGS_API,
+            params={"search": name},
+            auth=(USER, APP_PW)
+        )
+        logging.debug(f"[sync_tags] 검색 GET {TAGS_API}?search={name} → {r2.status_code}")
+        if r2.ok and r2.json():
+            ids.append(r2.json()[0]["id"])
         else:
-            payload = {
-                "name": name,
-                "slug": slugify(name, lowercase=True, allow_unicode=False)
-            }
-            # 새 태그 생성
-            r = requests.post(
-                TAGS_API,
-                auth=(USER, APP_PW),
-                json=payload
-            )
-            logging.debug(f"[sync_tags] POST {TAGS_API} {payload} → {r.status_code}")
-            if r.ok:
-                ids.append(r.json()["id"])
-            else:
-                logging.warning(f"[sync_tags] 태그 생성 실패 '{name}': {r.status_code}. 재조회 시도")
-                # 실패 시 검색으로 재조회
-                r2 = requests.get(
-                    TAGS_API,
-                    params={"search": name},
-                    auth=(USER, APP_PW)
-                )
-                logging.debug(f"[sync_tags] 검색 GET {TAGS_API}?search={name} → {r2.status_code}")
-                if r2.ok and r2.json():
-                    ids.append(r2.json()[0]["id"])
-                else:
-                    logging.error(f"[sync_tags] 태그 '{name}' 검색에도 실패했습니다.")
+            logging.error(f"[sync_tags] 태그 '{name}' 검색에도 실패했습니다.")
     return ids
 
 # ────────── WP 메타 + title, tags PATCH ──────────
