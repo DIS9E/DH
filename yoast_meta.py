@@ -149,8 +149,8 @@ def generate_meta(article: dict) -> dict:
     return meta
 
 # ────────── WP 태그 동기화 ──────────
-
 def sync_tags(names: list[str]) -> list[int]:
+    import datetime
     # 디버그: 호출 시각(UTC) 로깅
     logging.debug(f"[sync_tags] 호출 시각(UTC): {datetime.datetime.utcnow().isoformat()}")
     logging.debug(f"[sync_tags] WP_USERNAME set? {'YES' if USER else 'NO'}, WP_APP_PASSWORD set? {'YES' if APP_PW else 'NO'}")
@@ -174,11 +174,12 @@ def sync_tags(names: list[str]) -> list[int]:
 
     ids: list[int] = []
     for name in clean_names:
+        # 이미 있으면 ID만 추가
         if name in existing:
             ids.append(existing[name])
             continue
 
-        # 2) 새 태그 생성
+        # 2) 새 태그 생성 (POST에 auth 추가)
         payload = {
             "name": name,
             "slug": slugify(name, lowercase=True, allow_unicode=False)
