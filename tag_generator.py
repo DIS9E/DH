@@ -1,33 +1,51 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-내부용 태그 자동 생성 모듈
-• GPT 호출 → 방문 목적·분위기·특성 기준 태그 JSON 반환
-• 재시도 로직 포함
+SEO 최적화용 태그 생성기
+• GPT 호출 → 검색 엔진 최적화용 태그 JSON 배열 반환
 """
 
-import os
-import time
-import logging
-import requests
-import json
+import os, time, logging, requests, json
 from slugify import slugify
 
-# ────────── 환경 변수 ──────────
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
-GPT_MODEL  = "gpt-4o"  # 필요에 따라 조정
+GPT_MODEL  = "gpt-4o"
 
-# ────────── GPT 프롬프트 ──────────
 MASTER_PROMPT = """
-당신은 ‘벨라트리(Belatri)’ 블로그의 내부 분류 태그 생성기입니다.
-아래 규칙을 **반드시** 지켜주세요:
+당신은 ‘벨라트리(Belatri)’ 블로그의 SEO 태그 생성기입니다.
+입력된 맛집 정보(제목·본문·메뉴·리뷰)를 보고
+검색 엔진에서 잘 걸릴 키워드 태그를 최대 8개 이하로 JSON 배열 형태로 반환하세요.
+예: ["민스크맛집","감성카페","야외테라스","디저트강추"]
+"""
 
-1. 입력된 맛집 정보(제목·본문·메뉴·리뷰 등)를 보고
-2. 방문 목적(데이트·혼카페·업무)·분위기(조용한·북적이는)·특징(야외석·디저트 강추) 등을 기준으로
-3. 최대 8개 이하의 **내부용 태그**를 JSON 배열 형태로 반환하세요.
-4. 태그는 한글로, **공백 대신 하이픈(-)** 사용합니다.
-5. 절대 본문에 노출되지 않으며, 내부 분류용임을 기억하세요.
-
-예시 출력:
-```json
-["혼카페", "데이트-추천", "조용한-분위기", "야외-테라스", "디저트-강추"]
+def generate_tags_for_post(article: dict) -> list[str]:
+    snippet = (
+        f"제목: {article['title']}\n"
+        f"본문: {article['content'][:250]}\n"
+        f"메뉴: {', '.join(article.get('menu_items',[])[:3])}\n"
+        f"리뷰: {', '.join(article.get('reviews',[])[:2])}"
+    )
+    for attempt in range(3):
+        try:
+            resp = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization":f"Bearer {OPENAI_KEY}"},
+                json={
+                  "model": GPT_MODEL,
+                  "messages":[
+                    {"role":"system","content":MASTER_PROMPT},
+                    {"role":"user","content":snippet}
+                  ],
+                  "temperature":0.5,
+                  "max_tokens":100
+                },
+                timeout=30
+            )
+            resp.raise_for_status()
+            tags = json.loads(resp.json()["choices"][0]["message"]["content"].strip())
+            return [slugify(t,separator="-",lowercase=False) for t in tags]
+        except Exception as e:
+            logging.warning(f"[tag_generator] 실패 {attempt+1}/3: {e}")
+            time.sleep(1)
+    logging.error("[tag_generator] 최종 실패, 빈 리스트 반환")
+    return []
