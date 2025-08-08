@@ -1,5 +1,3 @@
-# wp_publisher.py
-```python
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -21,22 +19,25 @@ WP_URL          = os.getenv("WP_URL")               # ex) https://belatri.info
 WP_USERNAME     = os.getenv("WP_USERNAME")          # 워드프레스 사용자명
 WP_APP_PASSWORD = os.getenv("WP_APP_PASSWORD")      # 앱 비밀번호
 
-
 def upload_image_to_wp(image_url: str, auth) -> int:
     """이미지 URL을 WP에 업로드하고, 미디어 ID를 반환"""
-    img_resp = requests.get(image_url)
-    img_resp.raise_for_status()
-    img_data = img_resp.content
-    filename = os.path.basename(image_url)
-    headers = {
-        "Content-Disposition": f"attachment; filename={filename}",
-        "Content-Type": img_resp.headers.get("Content-Type", "image/jpeg")
-    }
-    media_endpoint = f"{WP_URL}/wp-json/wp/v2/media"
-    resp = requests.post(media_endpoint, headers=headers, data=img_data, auth=auth)
-    resp.raise_for_status()
-    return resp.json().get("id")
-
+    try:
+        img_resp = requests.get(image_url)
+        img_resp.raise_for_status()
+        filename = os.path.basename(image_url)
+        headers = {
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Content-Type": img_resp.headers.get("Content-Type", "image/jpeg")
+        }
+        media_endpoint = f"{WP_URL}/wp-json/wp/v2/media"
+        resp = requests.post(media_endpoint, headers=headers, data=img_resp.content, auth=auth)
+        resp.raise_for_status()
+        media_id = resp.json().get("id")
+        print(f"[upload_image] 성공: {filename} → ID {media_id}")
+        return media_id
+    except Exception as e:
+        print(f"[upload_image] 오류: {e}")
+        return None
 
 def publish_post(
     title: str,
@@ -59,10 +60,10 @@ def publish_post(
     tag_names = generate_tags_for_post(article_data)
     tag_ids = sync_tags(tag_names)
 
-    # 2) 슬러그 생성
+    # 2) slug 생성
     slug = slugify(title, separator="-", lowercase=True)
 
-    # 3) 포스트 데이터 준비
+    # 3) post_data 준비
     post_data = {
         "title":      title,
         "content":    content,
@@ -74,11 +75,9 @@ def publish_post(
 
     # 4) 대표 이미지 업로드
     if image_url:
-        try:
-            media_id = upload_image_to_wp(image_url, auth)
+        media_id = upload_image_to_wp(image_url, auth)
+        if media_id:
             post_data["featured_media"] = media_id
-        except Exception as e:
-            print(f"[publish_post] 이미지 업로드 오류: {e}")
 
     # 5) WP REST API로 게시
     endpoint = f"{WP_URL}/wp-json/wp/v2/posts"
@@ -89,4 +88,3 @@ def publish_post(
     else:
         print(f"[publish_post] 게시 실패({resp.status_code}): {resp.text}")
         return None
-
