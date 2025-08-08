@@ -1,4 +1,3 @@
-# wp_publisher.py
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -12,7 +11,7 @@ import os
 import requests
 from requests.auth import HTTPBasicAuth
 from slugify import slugify
-from tag_generator import generate_tags_for_post
+from tag_generator import generate_tags        # 수정: generate_tags_for_post → generate_tags
 from yoast_meta import sync_tags
 
 # ────────── 환경 변수 ──────────
@@ -58,7 +57,7 @@ def publish_post(
         "menu_items": menu_items or [],
         "reviews": reviews or []
     }
-    tag_names = generate_tags_for_post(article_data)
+    tag_names = generate_tags(article_data)    # 수정
     tag_ids = sync_tags(tag_names)
 
     # 2) slug 생성
@@ -90,32 +89,4 @@ def publish_post(
         return resp.json()
     else:
         print(f"[publish_post] 게시 실패({resp.status_code}): {resp.text}")
-        return None
-
-    
-    if response.status_code == 201:
-        print(f"✅ 게시 완료: {title}")
-        return response.json()
-    else:
-        print(f"❌ 업로드 실패: {response.status_code} - {response.text}")
-        return None
-
-def upload_image_to_wp(image_url: str, auth) -> int:
-    img_data = requests.get(image_url).content
-    filename = image_url.split("/")[-1]
-    
-    headers = {
-        "Content-Disposition": f"attachment; filename={filename}",
-        "Content-Type": "image/jpeg"
-    }
-    
-    media_endpoint = f"{WP_URL}/wp-json/wp/v2/media"
-    response = requests.post(media_endpoint, headers=headers, data=img_data, auth=auth)
-    
-    if response.status_code == 201:
-        image_id = response.json()["id"]
-        print(f"🖼️ 이미지 업로드 성공: {filename} → ID {image_id}")
-        return image_id
-    else:
-        print(f"❌ 이미지 업로드 실패: {response.status_code}")
         return None
