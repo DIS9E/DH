@@ -19,20 +19,20 @@ def crawl_cafehouse_pages(delay=1.0):
     session = requests.Session()
     session.headers.update(HEADERS)
 
-    # 1) 첫 페이지
+    # 1) 첫 페이지 로드
     print("🔍 첫 페이지 로드:", BASE_PAGE)
     res = session.get(BASE_PAGE)
     res.raise_for_status()
     soup = BeautifulSoup(res.text, "html.parser")
 
-    # CSRF 토큰 추출
+    # 2) CSRF 토큰 추출
     token_tag = soup.select_one("meta[name='csrf-token']")
-    csrf = token_tag["content"] if token_tag else ""
+    csrf = token_tag["content"] if token_tag and token_tag.has_attr("content") else ""
 
     posts = []
     seen  = set()
 
-    # 초기 링크
+    # 3) 초기 링크 수집
     for a in soup.select("div.w-post-name a.name__link"):
         href  = a["href"].strip()
         title = a.get_text(strip=True)
@@ -41,27 +41,34 @@ def crawl_cafehouse_pages(delay=1.0):
             seen.add(full)
             posts.append({"title": title, "url": full})
 
-    # 2) AJAX 로드
+    # 4) AJAX 로드 반복
     while True:
         offset = len(posts)
         print(f"🔍 AJAX 로드 – offset={offset}")
-        data = {
-            "offset": offset,
-            "url": "/category/cafehouse"
+
+        # multipart/form-data 로 전송
+        files = {
+            "offset": (None, str(offset)),
+            "url":    (None, "/category/cafehouse")
         }
         headers = {
             "X-CSRF-Token": csrf,
             "Referer":      BASE_PAGE
         }
-        ajax = session.post(LOAD_MORE, data=data, headers=headers)
+        ajax = session.post(LOAD_MORE, files=files, headers=headers)
         ajax.raise_for_status()
 
-        # JSON 페이로드에 'content' 키가 있는지 확인
-        try:
+        # 응답 처리 (JSON 일 수도, HTML 일 수도)
+        content_type = ajax.headers.get("Content-Type", "")
+        if "application/json" in content_type:
             payload = ajax.json()
-            html    = payload.get("content", ajax.text)
-        except ValueError:
+            html    = payload.get("content", "")
+        else:
             html = ajax.text
+
+        if not html.strip():
+            print("✅ 더 이상 새로운 게시글 없음. 종료.")
+            break
 
         snippet = BeautifulSoup(html, "html.parser")
         new_items = snippet.select("div.w-post-name a.name__link")
@@ -84,5 +91,6 @@ def crawl_cafehouse_pages(delay=1.0):
 
 
 if __name__ == "__main__":
-    for p in crawl_cafehouse_pages():
+    posts = crawl_cafehouse_pages()
+    for p in posts:
         print("-", p["title"], "→", p["url"])
