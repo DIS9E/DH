@@ -1,79 +1,49 @@
 # tag_generator.py
+```python
+# -*- coding: utf-8 -*-
+"""
+tag_generator.py
+WordPress 게시글 자동 태그 생성 모듈
+- article_data(딕셔너리)를 받아서 공개 태그 목록을 반환합니다.
 
-from typing import List
+필요 시 로직을 확장해 본문 어휘, 도시명, 메뉴 키워드 등을 기반으로 태그를 생성하세요.
+"""
 
-# 벨라루스 주요 도시
-BELARUS_CITIES = [
-    "Минск", "Брест", "Гомель", "Гродно", "Витебск", "Могилёв"
-]
-
-# 본문에서 찾을 메뉴 키워드 샘플
-MENU_KEYWORDS = [
-    "taco", "буррито", "шаурма", "плов", "суши", "блины",
-    "пельмени", "бургеры", "кофе", "латте", "завтрак", "десерт"
-]
-
-# 1차 요리 분류 → 키워드 매핑
-CUISINE_TYPES = {
-    "양식":     ["паста", "стейк", "бургер", "пицца", "ризотто"],
-    "중식":     ["китай", "лапша", "пекин", "мандарин", "дим-сам"],
-    "일식":     ["суши", "роллы", "якитори", "рамэн", "сашими"],
-    "한식":     ["кимчи", "бибимпап", "токпокки"],
-}
-
-# 2차 세부 분류 → 키워드 매핑
-SUB_CATEGORIES = {
-    "파스타":    ["паста", "спагетти", "карбонара"],
-    "피자":     ["пицца", "маргарита", "пепперони"],
-    "초밥":     ["суши", "нигири", "маки"],
-    "라멘":     ["рамэн", "тоночиру"],
-    "만두":     ["пельмени", "вареники"],
-    "크레페":    ["блины", "креп"],
-}
-
-def extract_tags(text: str) -> List[str]:
+def generate_tags_for_post(article_data: dict) -> list[str]:
     """
-    본문(text)을 스캔해서 아래 순서대로 태그를 뽑아 리턴합니다.
-    1) 도시
-    2) 메뉴 키워드
-    3) 1차 요리 분류
-    4) 2차 세부 분류
+    article_data 예시:
+      {
+        "title": str,
+        "content": str,
+        "menu_items": list[str],
+        "reviews": list[str]
+      }
+
+    간단한 태그 생성 예:
+      1) 제목에서 도시 추출 (민스크 등)
+      2) 메뉴 아이템 키워드
+      3) 음식 카테고리(한식, 양식 등)
     """
-    tags: List[str] = []
-    lower = text.lower()
+    tags = set()
+    title = article_data.get("title", "").lower()
+    content = article_data.get("content", "").lower()
 
-    # 1) 도시
-    for city in BELARUS_CITIES:
-        if city.lower() in lower and city not in tags:
-            tags.append(city)
+    # 1) 도시 태그
+    cities = ["минск", "гродно", "гомель", "витебск", "брест"]
+    for city in cities:
+        if city in title or city in content:
+            tags.add(city.capitalize())
 
-    # 2) 메뉴 키워드
-    for kw in MENU_KEYWORDS:
-        if kw in lower and kw not in tags:
-            tags.append(kw)
+    # 2) 메뉴 태그
+    for item in article_data.get("menu_items", []):
+        # 예: '치즈 케이크 BYN5' -> '치즈 케이크'
+        name = item.split()[0]
+        tags.add(name)
 
-    # 3) 요리 분류
-    for cuisine, kws in CUISINE_TYPES.items():
-        for kw in kws:
-            if kw in lower and cuisine not in tags:
-                tags.append(cuisine)
-                break
+    # 3) 리뷰 태그 (간단히 리뷰 첫 단어)
+    for review in article_data.get("reviews", []):
+        first_word = review.split()[0].strip('"')
+        tags.add(first_word)
 
-    # 4) 세부 분류
-    for subcat, kws in SUB_CATEGORIES.items():
-        for kw in kws:
-            if kw in lower and subcat not in tags:
-                tags.append(subcat)
-                break
-
-    return tags
-
-
-# 예시
-if __name__ == "__main__":
-    sample = """
-    Мы зашли в новое кафе в Минск, где подают отличные бургер и паста карбонара.
-    Завтрак здесь начинается с блины и латте.
-    """
-    print(extract_tags(sample))
-    # 출력 예: ['Минск', 'бургер', 'паста', '양식', '파스타', 'завтрак', 'блины']
+    return list(tags)
+``` 
