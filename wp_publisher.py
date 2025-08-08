@@ -1,3 +1,5 @@
+# wp_publisher.py
+```python
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -11,7 +13,7 @@ import os
 import requests
 from requests.auth import HTTPBasicAuth
 from slugify import slugify
-from tag_generator import generate_tags        # 수정: generate_tags_for_post → generate_tags
+from tag_generator import generate_tags_for_post
 from yoast_meta import sync_tags
 
 # ────────── 환경 변수 ──────────
@@ -28,15 +30,12 @@ def upload_image_to_wp(image_url: str, auth) -> int:
     filename = os.path.basename(image_url)
     headers = {
         "Content-Disposition": f"attachment; filename={filename}",
-        # 서버에서 전달된 Content-Type 사용
         "Content-Type": img_resp.headers.get("Content-Type", "image/jpeg")
     }
     media_endpoint = f"{WP_URL}/wp-json/wp/v2/media"
     resp = requests.post(media_endpoint, headers=headers, data=img_data, auth=auth)
     resp.raise_for_status()
-    media_id = resp.json().get("id")
-    print(f"[upload_image] 성공: {filename} → ID {media_id}")
-    return media_id
+    return resp.json().get("id")
 
 
 def publish_post(
@@ -57,13 +56,13 @@ def publish_post(
         "menu_items": menu_items or [],
         "reviews": reviews or []
     }
-    tag_names = generate_tags(article_data)    # 수정
+    tag_names = generate_tags_for_post(article_data)
     tag_ids = sync_tags(tag_names)
 
-    # 2) slug 생성
+    # 2) 슬러그 생성
     slug = slugify(title, separator="-", lowercase=True)
 
-    # 3) post_data 준비
+    # 3) 포스트 데이터 준비
     post_data = {
         "title":      title,
         "content":    content,
@@ -90,3 +89,4 @@ def publish_post(
     else:
         print(f"[publish_post] 게시 실패({resp.status_code}): {resp.text}")
         return None
+
