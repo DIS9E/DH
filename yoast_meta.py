@@ -155,7 +155,12 @@ def sync_tags(names: list[str]) -> list[int]:
         if c:
             clean_names.append(c)
 
-    resp = requests.get(TAGS_API, params={"per_page":100})
+    # 기존 태그 목록 조회 시에도 Basic Auth 추가
+    resp = requests.get(
+        TAGS_API,
+        params={"per_page": 100},
+        auth=(USER, APP_PW)
+    )
     resp.raise_for_status()
     existing = {t["name"]: t["id"] for t in resp.json()}
 
@@ -164,14 +169,27 @@ def sync_tags(names: list[str]) -> list[int]:
         if name in existing:
             ids.append(existing[name])
         else:
-            payload = {"name": name, "slug": slugify(name, lowercase=True, allow_unicode=False)}
+            payload = {
+                "name": name,
+                "slug": slugify(name, lowercase=True, allow_unicode=False)
+            }
             try:
-                r = requests.post(TAGS_API, auth=(USER, APP_PW), json=payload)
+                # 태그 생성(POST)은 이미 auth 적용
+                r = requests.post(
+                    TAGS_API,
+                    auth=(USER, APP_PW),
+                    json=payload
+                )
                 r.raise_for_status()
                 ids.append(r.json()["id"])
             except requests.exceptions.HTTPError as e:
                 logging.warning(f"태그 생성 실패 '{name}': {e}. 기존 태그 재조회합니다.")
-                r2 = requests.get(TAGS_API, params={"search": name})
+                # 생성 실패 시 검색(GET)에도 auth 추가
+                r2 = requests.get(
+                    TAGS_API,
+                    params={"search": name},
+                    auth=(USER, APP_PW)
+                )
                 if r2.ok and r2.json():
                     ids.append(r2.json()[0]["id"])
                 else:
