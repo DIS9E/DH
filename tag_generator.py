@@ -1,51 +1,79 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-SEO 최적화용 태그 생성기
-• GPT 호출 → 검색 엔진 최적화용 태그 JSON 배열 반환
-"""
+# tag_generator.py
 
-import os, time, logging, requests, json
-from slugify import slugify
+from typing import List
 
-OPENAI_KEY = os.getenv("OPENAI_API_KEY")
-GPT_MODEL  = "gpt-4o"
+# 벨라루스 주요 도시
+BELARUS_CITIES = [
+    "Минск", "Брест", "Гомель", "Гродно", "Витебск", "Могилёв"
+]
 
-MASTER_PROMPT = """
-당신은 ‘벨라트리(Belatri)’ 블로그의 SEO 태그 생성기입니다.
-입력된 맛집 정보(제목·본문·메뉴·리뷰)를 보고
-검색 엔진에서 잘 걸릴 키워드 태그를 최대 8개 이하로 JSON 배열 형태로 반환하세요.
-예: ["민스크맛집","감성카페","야외테라스","디저트강추"]
-"""
+# 본문에서 찾을 메뉴 키워드 샘플
+MENU_KEYWORDS = [
+    "taco", "буррито", "шаурма", "плов", "суши", "блины",
+    "пельмени", "бургеры", "кофе", "латте", "завтрак", "десерт"
+]
 
-def generate_tags_for_post(article: dict) -> list[str]:
-    snippet = (
-        f"제목: {article['title']}\n"
-        f"본문: {article['content'][:250]}\n"
-        f"메뉴: {', '.join(article.get('menu_items',[])[:3])}\n"
-        f"리뷰: {', '.join(article.get('reviews',[])[:2])}"
-    )
-    for attempt in range(3):
-        try:
-            resp = requests.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={"Authorization":f"Bearer {OPENAI_KEY}"},
-                json={
-                  "model": GPT_MODEL,
-                  "messages":[
-                    {"role":"system","content":MASTER_PROMPT},
-                    {"role":"user","content":snippet}
-                  ],
-                  "temperature":0.5,
-                  "max_tokens":100
-                },
-                timeout=30
-            )
-            resp.raise_for_status()
-            tags = json.loads(resp.json()["choices"][0]["message"]["content"].strip())
-            return [slugify(t,separator="-",lowercase=False) for t in tags]
-        except Exception as e:
-            logging.warning(f"[tag_generator] 실패 {attempt+1}/3: {e}")
-            time.sleep(1)
-    logging.error("[tag_generator] 최종 실패, 빈 리스트 반환")
-    return []
+# 1차 요리 분류 → 키워드 매핑
+CUISINE_TYPES = {
+    "양식":     ["паста", "стейк", "бургер", "пицца", "ризотто"],
+    "중식":     ["китай", "лапша", "пекин", "мандарин", "дим-сам"],
+    "일식":     ["суши", "роллы", "якитори", "рамэн", "сашими"],
+    "한식":     ["кимчи", "бибимпап", "токпокки"],
+}
+
+# 2차 세부 분류 → 키워드 매핑
+SUB_CATEGORIES = {
+    "파스타":    ["паста", "спагетти", "карбонара"],
+    "피자":     ["пицца", "маргарита", "пепперони"],
+    "초밥":     ["суши", "нигири", "маки"],
+    "라멘":     ["рамэн", "тоночиру"],
+    "만두":     ["пельмени", "вареники"],
+    "크레페":    ["блины", "креп"],
+}
+
+def extract_tags(text: str) -> List[str]:
+    """
+    본문(text)을 스캔해서 아래 순서대로 태그를 뽑아 리턴합니다.
+    1) 도시
+    2) 메뉴 키워드
+    3) 1차 요리 분류
+    4) 2차 세부 분류
+    """
+    tags: List[str] = []
+    lower = text.lower()
+
+    # 1) 도시
+    for city in BELARUS_CITIES:
+        if city.lower() in lower and city not in tags:
+            tags.append(city)
+
+    # 2) 메뉴 키워드
+    for kw in MENU_KEYWORDS:
+        if kw in lower and kw not in tags:
+            tags.append(kw)
+
+    # 3) 요리 분류
+    for cuisine, kws in CUISINE_TYPES.items():
+        for kw in kws:
+            if kw in lower and cuisine not in tags:
+                tags.append(cuisine)
+                break
+
+    # 4) 세부 분류
+    for subcat, kws in SUB_CATEGORIES.items():
+        for kw in kws:
+            if kw in lower and subcat not in tags:
+                tags.append(subcat)
+                break
+
+    return tags
+
+
+# 예시
+if __name__ == "__main__":
+    sample = """
+    Мы зашли в новое кафе в Минск, где подают отличные бургер и паста карбонара.
+    Завтрак здесь начинается с блины и латте.
+    """
+    print(extract_tags(sample))
+    # 출력 예: ['Минск', 'бургер', 'паста', '양식', '파스타', 'завтрак', 'блины']
