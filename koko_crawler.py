@@ -4,6 +4,7 @@
 koko_crawler.py – koko.by/category/cafehouse 전용 크롤러
 • 첫 페이지 파싱 → CSRF 토큰 & 초기 링크 수집
 • /load-more AJAX 호출로 다음 글들 순차 로드
+• 최대 max_posts개까지만 수집
 """
 
 import requests
@@ -15,7 +16,7 @@ BASE_PAGE = "https://koko.by/category/cafehouse"
 LOAD_MORE = "https://koko.by/load-more"
 HEADERS   = {"User-Agent": "Mozilla/5.0"}
 
-def crawl_cafehouse_pages(delay=1.0):
+def crawl_cafehouse_pages(delay=1.0, max_posts=50):
     session = requests.Session()
     session.headers.update(HEADERS)
 
@@ -40,13 +41,18 @@ def crawl_cafehouse_pages(delay=1.0):
         if full not in seen:
             seen.add(full)
             posts.append({"title": title, "url": full})
+        if len(posts) >= max_posts:
+            print(f"🔗 최대 {max_posts}개 수집 도달. 종료.")
+            return posts
 
     # 4) AJAX 로드 반복
     while True:
         offset = len(posts)
-        print(f"🔍 AJAX 로드 – offset={offset}")
+        if offset >= max_posts:
+            print(f"🔗 최대 {max_posts}개 수집 도달. 종료.")
+            break
 
-        # multipart/form-data 로 전송
+        print(f"🔍 AJAX 로드 – offset={offset}")
         files = {
             "offset": (None, str(offset)),
             "url":    (None, "/category/cafehouse")
@@ -58,7 +64,7 @@ def crawl_cafehouse_pages(delay=1.0):
         ajax = session.post(LOAD_MORE, files=files, headers=headers)
         ajax.raise_for_status()
 
-        # 응답 처리 (JSON 일 수도, HTML 일 수도)
+        # 응답 처리 (JSON 또는 HTML)
         content_type = ajax.headers.get("Content-Type", "")
         if "application/json" in content_type:
             payload = ajax.json()
@@ -70,12 +76,13 @@ def crawl_cafehouse_pages(delay=1.0):
             print("✅ 더 이상 새로운 게시글 없음. 종료.")
             break
 
-        snippet = BeautifulSoup(html, "html.parser")
+        snippet   = BeautifulSoup(html, "html.parser")
         new_items = snippet.select("div.w-post-name a.name__link")
         if not new_items:
             print("✅ 더 이상 새로운 게시글 없음. 종료.")
             break
 
+        new_count = 0
         for a in new_items:
             href  = a["href"].strip()
             title = a.get_text(strip=True)
@@ -83,6 +90,14 @@ def crawl_cafehouse_pages(delay=1.0):
             if full not in seen:
                 seen.add(full)
                 posts.append({"title": title, "url": full})
+                new_count += 1
+                if len(posts) >= max_posts:
+                    print(f"🔗 최대 {max_posts}개 수집 도달. 종료.")
+                    return posts
+
+        if new_count == 0:
+            print("✅ 더 이상 새로운 게시글 없음. 종료.")
+            break
 
         time.sleep(delay)
 
