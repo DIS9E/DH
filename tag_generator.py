@@ -1,5 +1,4 @@
 # tag_generator.py
-```python
 # -*- coding: utf-8 -*-
 """
 tag_generator.py
