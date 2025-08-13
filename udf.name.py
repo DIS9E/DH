@@ -261,8 +261,7 @@ def rewrite(article):
                 "   (쉼표 뒤 공백 금지, 정확히 6개)\n"
                 "2) 단어 규칙: 2–12자, 허용문자=한글·영문·하이픈만,\n"
                 "   따옴표·숫자·이모지 및 '의'·'적'·'적인' 꼬리 금지\n"
-                "3) 금지 단어: 벨라루스, 뉴스, 기사, 국제적, 경제의, 러시아의, 벨라루스의, 정치적 등\n"
-                "4) 구성 규칙: 인물 1개 + 지명 1개 + 사건·주제 4개 (기사 핵심 명사)\n"
+                "3) 구성 규칙: 인물 1개 + 지명 1개 + 사건·주제 4개 (기사 핵심 명사)\n"
             ),
         },
         {
@@ -646,10 +645,39 @@ def main():
             continue
 
         # ─── 태그 추출 & 게시 ────────────────────────────
-        tag_ids = [tid for n in tag_names(txt) if (tid := tag_id(n))]
+        # 1) 본문에 있는 ‘🏷️ 태그: …’에서 추출
+        names = tag_names(txt)
+
+        # 2) 폴백: 본문에 태그 줄이 없으면 Yoast 메타 생성 결과의 tags 사용
+        if not names:
+            try:
+                meta_for_tags = generate_meta(art)  # from yoast_meta import generate_meta
+                names = [t.strip() for t in meta_for_tags.get("tags", []) if t and t.strip()]
+                logging.debug("  🧷 tag fallback from yoast: %s", names)
+            except Exception as e:
+                logging.warning("  🧷 tag fallback 실패: %s", e)
+                names = []
+
+        # 3) 로컬 불용어 세트 + 중복 제거 + 최대 6개 제한 (전역 STOP 불필요)
+        stop_local = {"벨라루스", "뉴스", "기사", "국제", "정치", "경제", "사회"}
+        seen_names = set()
+        filtered = []
+        for n in names:
+            n = n.strip()
+            if not n or n in stop_local:
+                continue
+            if n not in seen_names:
+                seen_names.add(n)
+                filtered.append(n)
+            if len(filtered) >= 6:
+                break
+
+        # 4) 이름 -> WP 태그 ID
+        tag_ids = [tid for n in filtered if (tid := tag_id(n))]
+
         try:
             publish(art, txt, tag_ids)
-            logging.debug("  🟢 publish OK")                        # <<<
+            logging.debug("  🟢 publish OK")
             seen.add(norm(url))
             save_seen(seen)
         except Exception as e:
