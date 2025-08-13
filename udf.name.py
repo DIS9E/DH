@@ -437,19 +437,21 @@ def tag_names(txt: str) -> list[str]:
     GPT 결과에서 ‘🏷️ 태그: …’ 한 줄만 추출해
     → 콤마(,) 기준 분리
     → sanitize_tags()로 조사·접미사·이모지 제거
-    → STOP 리스트 제외
+    → '벨라루스'만 불용어로 제외
     → 최대 6개 반환
     """
-    # ① ‘🏷️ 태그:’ 줄만 안전하게 잡기  ─ (< 또는 줄바꿈 전까지만)
+    stop_words = {"벨라루스"}  # ← 여기만 제외
+
+    # ① ‘🏷️ 태그:’ 줄만 안전하게 잡기 (< 또는 줄바꿈 전까지만)
     m = re.search(r"🏷️\s*태그[^:]*[:：]\s*([^<\n]+)", txt)
     if not m:
         return []
 
-    # ② 콤마(,)만 구분자로 사용해 태그 후보 만들기
+    # ② 콤마(,)로 분리
     raw_tags = [t.strip("–-#• ") for t in m.group(1).split(",")]
 
-    # ③ 정제 → STOP 필터 → 최대 6개
-    cleaned = [t for t in sanitize_tags(raw_tags) if t and t not in STOP]
+    # ③ 정제 → 불용어 제외 → 최대 6개
+    cleaned = [t for t in sanitize_tags(raw_tags) if t and t not in stop_words]
     return cleaned[:6]
 
 def tag_id(name: str) -> int | None:
