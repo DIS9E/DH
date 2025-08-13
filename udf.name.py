@@ -183,12 +183,14 @@ STYLE_GUIDE = textwrap.dedent("""
 <p>원문을 100% 재배치하고, 추가 조사·분석을 더해 500자 이상 풍부하게 기술하세요.</p>
 
 [gpt_latest_data]
+[adsense_infeed]
 
 <h3>💬 전문가 전망</h3>
 <p>첫 번째 단락: 구체적 근거·숫자 포함 4문장 이상</p>
 <p>두 번째 단락: 시나리오·전망 포함 4문장 이상</p>
 
 [gpt_related_qna]
+[adsense_infeed]
 
 <p>🏷️ 태그: {tags}</p>
 <p>출처: UDF.name 원문<br>
@@ -247,8 +249,10 @@ def rewrite(article):
                 "    - `<h2>✍️ 편집자 주 …</h2>`\n"
                 "    - `<h3>📝 개요</h3>`\n"
                 "    - `[gpt_latest_data]`\n"   
+                "    - `[adsense_infeed]`\n"   
                 "    - `<h3>💬 전문가 전망</h3>`\n"
                 "    - `[gpt_related_qna]`\n"
+                "    - `[adsense_infeed]`\n"   
                 "    - `<p>🏷️ 태그: …</p>`\n"
                 "    - `<p>출처: …</p>`\n"
                 "    - `<p class=\\\"related\\\"></p>`\n\n"
@@ -308,26 +312,73 @@ def rewrite(article):
 CYRILLIC = re.compile(r"[А-Яа-яЁё]")
 
 def korean_title(src: str, context: str) -> str:
+    """
+    원제가 키릴이면 ➜ 한국어 헤드라인(콤마 도치형 + 강동사 + ! + 이모지)으로 변환
+    """
     if not CYRILLIC.search(src):
         return src
-    prompt = (
-        "기사 내용을 참고해 친근한 대화체로, 독자의 호기심을 끌 "
-        "45자 이내 한국어 제목을 만들고 이모지 1–3개를 자연스럽게 포함하세요.\n\n"
-        f"원제목: {src}\n기사 일부: {context[:300]}"
+
+    snippet = context[:900]  # 본문 힌트 충분히 제공
+
+    system = (
+        "너는 한국 뉴스 헤드라인 전문 편집자다. 아래 규칙을 100% 준수해라.\n"
+        "1) 형태: ‘주체, 상대/대상 + 강한 행동!’ (콤마 도치형, 문장 끝은 반드시 !)\n"
+        "2) 길이: 20~36자.\n"
+        "3) 금지: '~준비 중', '~논의', '~계획', '~가능성', '~에서/서' 등 설명형·완곡어.\n"
+        "4) 인물명: 가능하면 성/간단형 우선(예: '유리 젠코비치'→'젠코비치').\n"
+        "5) 이모지: 1–2개 필수(법⚖️, 충돌💥, 경고⚠️, 경찰🛡️, 경제📉/📈 등 문맥 맞춤).\n"
+        "6) 과장 광고 금지. 그러나 힘 있는 동사(도전/격돌/정면승부/압박/파열) 사용.\n"
+        "7) 고유명사는 한국어 통용 표기로 간결하게.\n"
     )
-    headers = {"Authorization":f"Bearer {OPEN_KEY}", "Content-Type":"application/json"}
-    data = {"model":"gpt-4o-mini","messages":[{"role":"user","content":prompt}],
-            "temperature":0.8,"max_tokens":60}
+
+    examples = (
+        "예시 변환:\n"
+        "• 원문: 'Yury Zenkovich prepares a lawsuit in the US against security staff'\n"
+        "  결과: '젠코비치, 보안 요원 상대로 법정 도전!⚖️💥'\n"
+        "• 원문: 'Opposition figure files urgent motion over airport scuffle'\n"
+        "  결과: '야권 인사, 공항 충돌 두고 긴급 신청!💥⚖️'\n"
+    )
+
+    prompt = (
+        f"{examples}\n"
+        f"원제목: {src}\n"
+        f"기사 일부(요약 참고용): {snippet}\n"
+        "위 규칙대로 한국어 헤드라인 1개만 출력."
+    )
+
+    headers = {"Authorization": f"Bearer {OPEN_KEY}", "Content-Type": "application/json"}
+    data = {
+        "model": "gpt-4o-mini",
+        "messages": [{"role": "system", "content": system},
+                     {"role": "user", "content": prompt}],
+        "temperature": 0.7,
+        "max_tokens": 60
+    }
+
     try:
         r = requests.post("https://api.openai.com/v1/chat/completions",
                           headers=headers, json=data, timeout=20)
         r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"].strip()
-    except:
+        title = r.json()["choices"][0]["message"]["content"].strip()
+    except Exception:
         return src
 
-
-STOP = {"벨라루스","뉴스","기사"}
+    # 후처리: 이모지/느낌표/길이 보정
+    if not re.search(r"[⚖️💥🛡️⚠️📉📈🔥]", title):
+        title += "⚖️💥"
+    if "!" not in title:
+        title = title.rstrip(" .") + "!"
+    MAXLEN = 36
+    if len(title) > MAXLEN:
+        tail = ""
+        m = re.search(r"[⚖️💥🛡️⚠️📉📈🔥]+!?$", title)
+        if m:
+            tail = m.group(0)
+            core = title[:MAXLEN - len(tail)].rstrip(" ,·—-")
+            title = core + tail
+        else:
+            title = title[:MAXLEN].rstrip(" ,·—-") + "!"
+    return title
 
 # ─── 불용어·조사 제거용 상수 ──────────
 _KR_STOP_SUFFIX = (
