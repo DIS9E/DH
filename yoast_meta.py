@@ -181,16 +181,19 @@ def sync_tags(names: list[str]) -> list[int]:
 
 # ────────── WP 메타 + title, tags PATCH ──────────
 def push_meta(post_id: int, meta: dict):
-    payload = {
-        "slug":  meta["slug"],
-        "title": meta.get("title", ""),
-        "tags":  sync_tags(meta.get("tags", [])),
-        "meta": {
-            "_yoast_wpseo_focuskw":  meta.get("focus_keyphrase", ""),
-            "_yoast_wpseo_title":    meta.get("seo_title", ""),
-            "_yoast_wpseo_metadesc": meta.get("meta_description", ""),
-        }
+    """
+    Yoast 관련 메타만 업데이트한다.
+    (중요) WP 기본 필드(title/slug/tags/categories)는 절대 수정하지 않는다.
+    """
+    yoast_meta = {
+        "_yoast_wpseo_focuskw":               meta.get("focus_keyphrase", "") or "",
+        "_yoast_wpseo_focuskw_text_input":    meta.get("focus_keyphrase", "") or "",
+        "_yoast_wpseo_title":                 meta.get("seo_title", "") or "",
+        "_yoast_wpseo_metadesc":              meta.get("meta_description", "") or "",
     }
+
+    payload = {"meta": yoast_meta}  # ← title/slug/tags 넣지 마세요
+
     r = requests.post(
         f"{POSTS_API}/{post_id}",
         json=payload,
@@ -198,7 +201,7 @@ def push_meta(post_id: int, meta: dict):
         timeout=20
     )
     r.raise_for_status()
-    logging.debug(f"🎯 Yoast PATCH 응답: {r.status_code}")
+    logging.debug(f"🎯 Yoast-only PATCH 응답: {r.status_code}")
 
 # ────────── 예시: 새 글 처리 루프 ──────────
 def main():
