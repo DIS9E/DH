@@ -153,7 +153,10 @@ def sync_tags(names: list[str]) -> list[int]:
             ids.append(existing[name])
             continue
 
-        payload = {"name": name, "slug": slugify(name, lowercase=True, allow_unicode=False)}
+        payload = {
+            "name": name,
+            "slug": slugify(name, lowercase=True, allow_unicode=False)
+        }
         r = requests.post(TAGS_API, auth=(USER, APP_PW), json=payload)
         if r.ok:
             ids.append(r.json()["id"])
@@ -165,15 +168,16 @@ def sync_tags(names: list[str]) -> list[int]:
                 logging.error(f"태그 '{name}' 생성/검색 실패")
     return ids
 
-# ────────── 메타 + 태그 업로드 ──────────
+# ────────── 메타 + 태그 + 카테고리 업로드 ──────────
 def push_meta(post_id: int, meta: dict):
     payload = {
-        "slug":  meta["slug"],
+        "slug": meta["slug"],
         "title": meta.get("title", ""),
-        "tags":  sync_tags(meta.get("tags", [])),
+        "tags": sync_tags(meta.get("tags", [])),
+        "categories": [2437],  # ← 벨라루스 맛집 고정 카테고리 ID
         "meta": {
-            "_yoast_wpseo_focuskw":  meta.get("focus_keyphrase", ""),
-            "_yoast_wpseo_title":    meta.get("seo_title", ""),
+            "_yoast_wpseo_focuskw": meta.get("focus_keyphrase", ""),
+            "_yoast_wpseo_title": meta.get("seo_title", ""),
             "_yoast_wpseo_metadesc": meta.get("meta_description", "")
         }
     }
