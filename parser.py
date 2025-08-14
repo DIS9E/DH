@@ -85,3 +85,4 @@ def parse_post(url: str) -> dict | None:
     except Exception as e:
         logging.error(f"[parser] 예외 발생: {e} ({url})", exc_info=True)
         return None
+
