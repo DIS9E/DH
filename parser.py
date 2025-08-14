@@ -81,3 +81,7 @@ def parse_post(url: str) -> dict | None:
             "map_url": map_url,
             "source_url": url,
         }
+
+    except Exception as e:
+        logging.error(f"[parser] 예외 발생: {e} ({url})", exc_info=True)
+        return None
