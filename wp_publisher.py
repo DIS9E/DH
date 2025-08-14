@@ -115,7 +115,7 @@ def publish_post(
 ):
     """
     글 작성 + 대표 이미지 + 지도 iframe 삽입.
-    카테고리는 벨라루스 맛집(2437)으로 고정.
+    카테고리는 category_id로 동적 설정.
     """
     if not _check_env():
         return None
@@ -144,7 +144,7 @@ def publish_post(
         "content": content,
         "status": "publish",
         "slug": slug,
-        "categories": [2437],  # ← 벨라루스 맛집 고정
+        "categories": [category_id] if category_id else [],  # ✅ 동적 적용
     }
 
     # 대표 이미지 업로드
