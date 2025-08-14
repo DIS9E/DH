@@ -1,42 +1,3 @@
-# content_rewriter.py
-
-import openai
-import os
-
-# 환경 변수에서 API 키 로드
-openai.api_key = os.getenv("OPENAI_API_KEY")
-
-def rewrite_content(data: dict) -> str:
-    """
-    1) build_prompt로 사용자 프롬프트 생성
-    2) GPT에 요청 (v1+ API)
-    3) 응답 텍스트 반환
-    """
-    prompt = build_prompt(data)
-    print("📤 GPT 요청 중...")
-    
-    # v1+ 클라이언트 방식
-    res = openai.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "당신은 한국인 여행자를 위한 글을 작성하는 편집자입니다. "
-                    "너무 AI처럼 보이지 않게 자연스럽고 생생하게 씁니다."
-                )
-            },
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.7
-    )
-
-    # v1+ 응답 접근 방식
-    return res.choices[0].message.content
-
-
-# content_rewriter.py
-
 import openai
 import os
 
@@ -50,8 +11,8 @@ def rewrite_content(data: dict) -> str:
     3) HTML 구조로 본문 조립하여 반환
     """
     prompt = build_prompt(data)
-    print("📤 GPT 요청 중...")
-    
+    print("\U0001F4E4 GPT 요청 중...")
+
     # GPT 호출
     res = openai.chat.completions.create(
         model="gpt-4o",
@@ -98,9 +59,8 @@ def rewrite_content(data: dict) -> str:
 <p>{"<br>".join(info)}</p>
 {map_block}
 
-<p class="source">원문: <a href="{data['source_url']}" rel="nofollow noopener">출처</a> · 저작권은 원문 사이트에 있으며 본 글은 소개 목적의 요약/비평입니다.</p>
+<p class=\"source\">원문: <a href=\"{data['source_url']}\" rel=\"nofollow noopener\">출처</a> · 저작권은 원문 사이트에 있으며 본 글은 소개 목적의 요약/비평입니다.</p>
 """.strip()
-
 
 def build_prompt(data: dict) -> str:
     """
@@ -125,8 +85,6 @@ def build_prompt(data: dict) -> str:
 {reviews_formatted}
 """.strip()
 
-
-# 로컬 테스트용
 if __name__ == "__main__":
     sample_data = {
         "title": "테스트 카페",
@@ -140,19 +98,3 @@ if __name__ == "__main__":
     }
     html = rewrite_content(sample_data)
     print(html)
-
-
-if __name__ == "__main__":
-    # 로컬 테스트
-    sample_data = {
-        "title": "테스트 카페",
-        "address": "Минск, ул. Пример, 1",
-        "hours": "с 10:00 до 22:00",
-        "phone": "+375291234567",
-        "menu_items": ["아메리카노 – 5 BYN", "치즈케이크 – 7 BYN"],
-        "reviews": ["분위기가 정말 좋아요.", "커피 맛이 훌륭합니다."],
-        "map_url": "https://maps.example.com",
-        "source_url": "https://koko.by/cafehouse/example"
-    }
-    content = rewrite_content(sample_data)
-    print(content)
