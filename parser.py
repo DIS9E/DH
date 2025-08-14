@@ -68,7 +68,7 @@ def publish_post(
     menu_items: list | None = None,
     reviews: list | None = None,
     map_url: str | None = None,
-    images: list | None = None,       # 본문 이미지 추가
+    images: list | None = None,       # 분문 이미지 추가
 ):
     if not _check_env():
         return None
@@ -79,16 +79,16 @@ def publish_post(
         logging.error("[publish_post] 인증 실패: Application Password/서버 설정 확인 필요")
         return None
 
-    # 슬러그 생성
+    # 슬랩 생성
     slug = slugify(title, separator="-", lowercase=True, allow_unicode=True)
 
-    # 본문 이미지 HTML (상단 삽입용)
+    # 분문 상단 이미지 HTML 구성
     img_html = ""
     if images:
         for img_url in images:
             img_html += f'<p><img src="{img_url}" alt="{title}" style="max-width:100%; height:auto;"></p>\n'
 
-    # 지도 삽입
+    # 지도 iframe 삽입
     map_iframe = ""
     if map_url:
         map_iframe = f"""
@@ -97,7 +97,7 @@ def publish_post(
 </div>
 """.strip()
 
-    # 최종 본문 구성
+    # 최종 분문 구성
     full_content = f"{img_html}\n{content}\n\n{map_iframe}"
 
     # 게시물 데이터
@@ -119,13 +119,11 @@ def publish_post(
             return resp.json()
         else:
             logging.error(f"[publish_post] 게시 실패 상태: {resp.status_code}")
-            logging.error(f"[publish_post] 실패 본문: {resp.text[:1000]}")
+            logging.error(f"[publish_post] 실패 부문: {resp.text[:1000]}")
             return None
     except Exception as e:
         logging.error(f"[publish_post] 예외: {e}", exc_info=True)
         return None
 
 if __name__ == "__main__":
-    sample = "https://koko.by/cafehouse/13610-tako-burrito"
-    from pprint import pprint
-    pprint(parse_post(sample))
+    print("이 모듈은 WordPress 자동 게시 전용입니다. 직접 실행하지 마세요.")
