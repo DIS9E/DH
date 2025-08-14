@@ -16,6 +16,8 @@ CATEGORY_ID = int(os.getenv("WP_CAFE_CATEGORY_ID", "0"))  # 필요 없으면 0
 
 def main():
     posts = crawl_cafehouse_pages()
+    logging.info(f"[run] 크롤링된 포스트 수: {len(posts)}")  # ✅ 추가 로그
+
     for post in posts:
         url = post.get("url")
         title = post.get("title")
@@ -39,7 +41,7 @@ def main():
             image_url=image_url,
             menu_items=data.get("menu_items"),
             reviews=data.get("reviews"),
-            map_url=data.get("map_url"),  # ← 지도 삽입 추가!
+            map_url=data.get("map_url"),
         )
         if not wp_res:
             logging.error(f"[run] 게시 실패: {data['title']}")
@@ -57,3 +59,5 @@ def main():
 
         time.sleep(0.5)
 
+if __name__ == "__main__":
+    main()
