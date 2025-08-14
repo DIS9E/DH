@@ -16,52 +16,52 @@ def parse_post(url):
 
     soup = BeautifulSoup(res.text, "html.parser")
 
-    # 제목
+    # ────────── 제목 ──────────
     title_tag = soup.select_one("h1.pagetitle.posttitle._js-pagetitle-text")
     title = title_tag.get_text(strip=True) if title_tag else "제목 없음"
 
-    # 본문 영역: 제목 다음 형제들 중 태그 영역 전까지 수집
-    body_nodes = []
-    if title_tag:
-        for sib in title_tag.find_next_siblings():
-            if sib.name == "div" and sib.get("class") and "text" in sib.get("class"):
-                break
-            body_nodes.append(sib)
+    # ────────── 본문 HTML ──────────
+    content_div = soup.select_one("div.text")
+    html_content = str(content_div) if content_div else ""
 
-    # 원본 HTML 내용(재작성에 활용)
-    html_content = "".join(str(node) for node in body_nodes)
+    # ────────── 주소 추출 ──────────
+    address = "정보 없음"
+    addr_patterns = re.compile(r"(ул\.|пр\.|г\.|дом|улица)", re.IGNORECASE)
+    for tag in soup.find_all("div", class_="text"):
+        if addr_patterns.search(tag.get_text()):
+            address = tag.get_text(strip=True)
+            break
 
-    # 주소 추출
-    address_tag = soup.find("div", class_="text", string=re.compile(r"пр\\.|ул\\."))
-    address = address_tag.get_text(strip=True) if address_tag else "정보 없음"
-
-    # 영업시간 추출
+    # ────────── 영업시간 ──────────
     hours = []
-    for tag in soup.find_all("div", string=re.compile(r"(с \d{1,2}:\d{2}|до \d{1,2}:\d{2})")):
-        hours.append(tag.get_text(strip=True).replace("—", "-"))
+    hour_pattern = re.compile(r"(с\s*\d{1,2}:\d{2}\s*до\s*\d{1,2}:\d{2})", re.IGNORECASE)
+    for tag in soup.find_all(text=hour_pattern):
+        h = hour_pattern.search(tag)
+        if h:
+            hours.append(h.group(1))
     hours = "\n".join(hours) if hours else "정보 없음"
 
-    # 전화번호 (선택)
+    # ────────── 전화번호 (현재 없음) ──────────
     phone = ""
 
-    # 메뉴 항목
+    # ────────── 메뉴 항목 ──────────
     menu_items = re.findall(r"[А-Яа-я\w\s]+? за \d+р", html_content)
 
-    # 리뷰
+    # ────────── 리뷰 (strong, blockquote 기반) ──────────
     reviews = [t.get_text(strip=True) for t in BeautifulSoup(html_content, "html.parser").find_all(["strong", "blockquote"])]
     reviews = reviews[:3]
 
-    # 이미지 URL 수집
+    # ────────── 이미지 ──────────
     images = []
-    for img in soup.select("img[src]"):
-        src = img["src"]
-        images.append(urljoin(url, src))
+    post_section = soup.select_one("div.text") or soup
+    for img in post_section.select("img[src]"):
+        src = img.get("src")
+        if src and not src.startswith("data:"):
+            images.append(urljoin(url, src))
 
-    # 지도 iframe URL (얀덱스만 허용)
-    iframe = soup.find("iframe")
-    map_url = iframe.get("src", "") if iframe else ""
-    if not map_url.startswith("https://yandex.ru/map-widget"):
-        map_url = ""
+    # ────────── 지도 URL (얀덱스 iframe만) ──────────
+    iframe = soup.select_one("iframe[src*='yandex']")
+    map_url = iframe["src"] if iframe else ""
 
     return {
         "title": title,
@@ -75,6 +75,12 @@ def parse_post(url):
         "map_url": map_url,
         "source_url": url
     }
+
+# 테스트
+if __name__ == "__main__":
+    sample = "https://koko.by/cafehouse/13610-tako-burrito"
+    from pprint import pprint
+    pprint(parse_post(sample))
 
 if __name__ == "__main__":
     sample = "https://koko.by/cafehouse/13610-tako-burrito"
