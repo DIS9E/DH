@@ -30,7 +30,7 @@ def main():
         # 2) 재작성
         content = rewrite_content(data)
 
-        # 3) 게시 (태그/메타는 아직 X)
+        # 3) 게시 (대표 이미지 + 지도 포함)
         image_url = (data.get("images") or [None])[0]
         wp_res = publish_post(
             title=data["title"],
@@ -39,6 +39,7 @@ def main():
             image_url=image_url,
             menu_items=data.get("menu_items"),
             reviews=data.get("reviews"),
+            map_url=data.get("map_url"),  # ← 지도 삽입 추가!
         )
         if not wp_res:
             logging.error(f"[run] 게시 실패: {data['title']}")
@@ -46,13 +47,18 @@ def main():
 
         post_id = wp_res.get("id")
 
-        # 4) 메타/태그 생성 & 적용 (yoast_meta에서 처리)
+        # 4) 메타/태그 생성 & 적용
         try:
             meta = generate_meta({"html": content, "title": data["title"]})
             push_meta(post_id, meta)
             logging.info(f"[run] 메타 적용 성공: post_id={post_id}")
         except Exception as e:
             logging.error(f"[run] 메타 적용 실패 (post_id={post_id}): {e}", exc_info=True)
+
+        time.sleep(0.5)
+
+if __name__ == "__main__":
+    main()
 
         time.sleep(0.5)
 
