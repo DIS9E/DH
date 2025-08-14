@@ -108,11 +108,12 @@ def publish_post(
     content: str,
     category_id: int | None = None,
     image_url: str | None = None,
-    menu_items: list | None = None,   # 현재는 사용하지 않지만 시그니처 유지
-    reviews: list | None = None,      # 현재는 사용하지 않지만 시그니처 유지
+    menu_items: list | None = None,
+    reviews: list | None = None,
+    map_url: str | None = None,  # ← 새 인자
 ):
     """
-    글 작성 + (선택) 대표 이미지 설정.
+    글 작성 + (선택) 대표 이미지 설정 + 지도 삽입.
     태그/메타는 게시 후 yoast_meta.py의 push_meta()에서 처리.
     """
     if not _check_env():
@@ -120,30 +121,39 @@ def publish_post(
 
     session = _make_session()
 
-    # 인증 사전 점검 (실패하면 바로 중단)
+    # 인증 사전 점검
     if not wp_selftest(session):
         logging.error("[publish_post] 인증 실패: Application Password/서버 설정 확인 필요")
         return None
 
-    # 1) slug 생성 (한글 포함 허용)
+    # 1) slug 생성
     slug = slugify(title, separator="-", lowercase=True, allow_unicode=True)
 
-    # 2) post_data 준비 (태그는 여기서 넣지 않음)
+    # 2) 지도 삽입
+    if map_url:
+        map_iframe = f"""
+            <div style="margin-top:20px">
+              <iframe src="{map_url}" width="100%" height="300" style="border:0;" allowfullscreen loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+            </div>
+        """.strip()
+        content += f"\n\n{map_iframe}"
+
+    # 3) post_data
     post_data = {
         "title": title,
         "content": content,
         "status": "publish",
         "slug": slug,
-        "categories": [category_id] if category_id else [],
+        "categories": [2437],  # ← 고정: 벨라루스 맛집
     }
 
-    # 3) 대표 이미지 업로드 (선택)
+    # 4) 대표 이미지 업로드
     if image_url:
         media_id = upload_image_to_wp(image_url, session)
         if media_id:
             post_data["featured_media"] = media_id
 
-    # 4) 게시
+    # 5) 업로드
     endpoint = f"{WP_URL}/wp-json/wp/v2/posts"
     try:
         resp = session.post(endpoint, json=post_data, timeout=TIMEOUT_POST)
