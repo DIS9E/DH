@@ -29,13 +29,15 @@ def main():
             logging.warning(f"[run] 파싱 실패: {url}")
             continue
 
-        # 2) 재작성
-        content = rewrite_content(data)
+        # 2) 재작성 (본문 + 제목)
+        content, new_title = rewrite_content(data)
+        logging.debug(f"[run] 재작성 제목: {new_title}")
+        logging.debug(f"[run] 재작성 본문: {content[:300]}...")  # 처음 300자만
 
         # 3) 게시 (대표 이미지 + 지도 포함)
         image_url = (data.get("images") or [None])[0]
         wp_res = publish_post(
-            title=data["title"],
+            title=new_title or data["title"],  # ✅ 재작성 제목 우선 사용
             content=content,
             category_id=CATEGORY_ID if CATEGORY_ID else None,
             image_url=image_url,
@@ -51,7 +53,7 @@ def main():
 
         # 4) 메타/태그 생성 & 적용
         try:
-            meta = generate_meta({"html": content, "title": data["title"]})
+            meta = generate_meta({"html": content, "title": new_title or data["title"]})
             push_meta(post_id, meta)
             logging.info(f"[run] 메타 적용 성공: post_id={post_id}")
         except Exception as e:
