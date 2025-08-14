@@ -11,7 +11,7 @@ def rewrite_content(data: dict) -> str:
     3) HTML 구조로 본문 조립하여 반환
     """
     prompt = build_prompt(data)
-    print("\U0001F4E4 GPT 요청 중...")
+    print("📤 GPT 요청 중...")
 
     # GPT 호출
     res = openai.chat.completions.create(
@@ -28,39 +28,59 @@ def rewrite_content(data: dict) -> str:
 
     body = res.choices[0].message.content.strip()
 
-    # HTML 조립
-    menu_html = "\n".join(f"<li>{item}</li>" for item in data.get("menu_items", []))
-    review_html = "\n".join(f"<li>{r}</li>" for r in data.get("reviews", []))
+    # 조건부 HTML 조립
+    menu_items = data.get("menu_items", [])
+    reviews = data.get("reviews", [])
 
-    info = []
+    menu_html = f"""
+<h3>뭐 먹지</h3>
+<ul>
+{''.join(f"<li>{item}</li>" for item in menu_items)}
+</ul>
+""".strip() if menu_items else ""
+
+    review_html = f"""
+<h3>분위기 & 이용 팁</h3>
+<ul>
+{''.join(f"<li>{r}</li>" for r in reviews)}
+</ul>
+""".strip() if reviews else ""
+
+    # 기본 정보
+    info_parts = []
     if data.get("address"):
-        info.append(f"<b>주소:</b> {data['address']}")
+        info_parts.append(f"<b>주소:</b> {data['address']}")
     if data.get("hours"):
-        info.append(f"<b>영업시간:</b> {data['hours']}")
+        info_parts.append(f"<b>영업시간:</b> {data['hours']}")
     if data.get("phone"):
-        info.append(f"<b>연락처:</b> {data['phone']}")
+        info_parts.append(f"<b>연락처:</b> {data['phone']}")
 
-    map_block = (
-        f'<iframe src="{data["map_url"]}" width="100%" height="300" style="border:0;" '
-        f'allowfullscreen loading="lazy"></iframe>' if data.get("map_url") else ""
-    )
+    info_block = f"""
+<h3>기본 정보</h3>
+<p>{"<br>".join(info_parts)}</p>
+""".strip() if info_parts else ""
 
+    # 지도
+    map_block = f"""
+<iframe src="{data['map_url']}" width="100%" height="300" style="border:0;" allowfullscreen loading="lazy"></iframe>
+""".strip() if data.get("map_url") else ""
+
+    # 출처
+    source_block = f"""
+<p class="source">원문: <a href="{data['source_url']}" rel="nofollow noopener">출처</a> · 저작권은 원문 사이트에 있으며 본 글은 소개 목적의 요약/비평입니다.</p>
+""".strip()
+
+    # 최종 HTML 반환
     return f"""
 <h2>{data['title']}</h2>
 <p>{body}</p>
-
-<h3>뭐 먹지</h3>
-<ul>{menu_html}</ul>
-
-<h3>분위기 & 이용 팁</h3>
-<ul>{review_html}</ul>
-
-<h3>기본 정보</h3>
-<p>{"<br>".join(info)}</p>
+{menu_html}
+{review_html}
+{info_block}
 {map_block}
-
-<p class=\"source\">원문: <a href=\"{data['source_url']}\" rel=\"nofollow noopener\">출처</a> · 저작권은 원문 사이트에 있으며 본 글은 소개 목적의 요약/비평입니다.</p>
+{source_block}
 """.strip()
+
 
 def build_prompt(data: dict) -> str:
     """
@@ -84,6 +104,7 @@ def build_prompt(data: dict) -> str:
 방문자 리뷰:
 {reviews_formatted}
 """.strip()
+
 
 if __name__ == "__main__":
     sample_data = {
