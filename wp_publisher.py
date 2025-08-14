@@ -73,24 +73,35 @@ def upload_image_to_wp(image_url: str, session: requests.Session) -> int | None:
     try:
         r = session.get(image_url, timeout=TIMEOUT_GET)
         r.raise_for_status()
+
+        # 파일 확장자 필터링 (WP에서 막는 형식 제거)
+        blocked_exts = [".svg", ".webp", ".avif", ".ico"]
+        if any(image_url.lower().endswith(ext) for ext in blocked_exts):
+            logging.warning(f"[upload_image] 지원하지 않는 이미지 포맷 건너뜀: {image_url}")
+            return None
+
         filename = os.path.basename(image_url.split("?")[0]) or "featured.jpg"
+        
+        # Content-Type 강제 지정 (jpeg로 고정, 안정성 우선)
         headers = {
             "Content-Disposition": f"attachment; filename={filename}",
-            "Content-Type": r.headers.get("Content-Type", "image/jpeg"),
+            "Content-Type": "image/jpeg"
         }
+
         media_endpoint = f"{WP_URL}/wp-json/wp/v2/media"
         up = session.post(media_endpoint, headers=headers, data=r.content, timeout=TIMEOUT_POST)
         logging.info(f"[upload_image] POST {media_endpoint} → {up.status_code}")
+
         if up.status_code != 201:
             logging.error(f"[upload_image] 실패 본문: {up.text[:500]}")
             return None
+
         media_id = up.json().get("id")
         logging.info(f"[upload_image] 성공: {filename} → ID {media_id}")
         return media_id
     except Exception as e:
         logging.error(f"[upload_image] 예외: {e}", exc_info=True)
         return None
-
 
 def publish_post(
     title: str,
