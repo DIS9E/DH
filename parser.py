@@ -58,8 +58,8 @@ def parse_post(url):
         src = img["src"]
         images.append(urljoin(url, src))
 
-    # 지도 iframe URL
-    iframe = soup.find("iframe")
+    # 지도 iframe URL (얀덱스 지도만 추출)
+    iframe = soup.find("iframe", src=re.compile(r"yandex\.ru/map-widget"))
     map_url = iframe.get("src", "") if iframe else ""
 
     return {
