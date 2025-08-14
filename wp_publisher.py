@@ -3,7 +3,7 @@
 """
 WordPress 자동 업로드 모듈 (게시만 담당)
 • 대표 이미지 업로드
-• 슬러그 생성
+• 슬러그 생성 (한글 지원)
 • 상세 오류 로깅 (상태코드/본문)
 • 태그/메타는 yoast_meta.py에서 별도로 적용
 """
@@ -81,7 +81,7 @@ def upload_image_to_wp(image_url: str, session: requests.Session) -> int | None:
             return None
 
         filename = os.path.basename(image_url.split("?")[0]) or "featured.jpg"
-        
+
         # Content-Type 강제 지정 (jpeg로 고정, 안정성 우선)
         headers = {
             "Content-Disposition": f"attachment; filename={filename}",
@@ -125,8 +125,8 @@ def publish_post(
         logging.error("[publish_post] 인증 실패: Application Password/서버 설정 확인 필요")
         return None
 
-    # 1) slug 생성 (ASCII)
-    slug = slugify(title, separator="-", lowercase=True)
+    # 1) slug 생성 (한글 포함 허용)
+    slug = slugify(title, separator="-", lowercase=True, allow_unicode=True)
 
     # 2) post_data 준비 (태그는 여기서 넣지 않음)
     post_data = {
@@ -152,7 +152,6 @@ def publish_post(
             logging.info(f"[publish_post] 게시 성공: {title}")
             return resp.json()
         else:
-            # 실패 사유를 정확히 보기 위해 본문 최대 1000자 로그
             body = resp.text
             logging.error(f"[publish_post] 게시 실패 상태: {resp.status_code}")
             logging.error(f"[publish_post] 실패 본문: {body[:1000]}")
