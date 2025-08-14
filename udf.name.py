@@ -183,7 +183,7 @@ STYLE_GUIDE = textwrap.dedent("""
 <p>원문을 100% 재배치하고, 추가 조사·분석을 더해 500자 이상 풍부하게 기술하세요.</p>
 
 [gpt_latest_data]
-[adsense_inarticle]
+[adsense_infeed]
 
 <h3>💬 전문가 전망</h3>
 <p>첫 번째 단락: 구체적 근거·숫자 포함 4문장 이상</p>
@@ -249,7 +249,7 @@ def rewrite(article):
                 "    - `<h2>✍️ 편집자 주 …</h2>`\n"
                 "    - `<h3>📝 개요</h3>`\n"
                 "    - `[gpt_latest_data]`\n"   
-                "    - `[adsense_inarticle]`\n"   
+                "    - `[adsense_infeed]`\n"   
                 "    - `<h3>💬 전문가 전망</h3>`\n"
                 "    - `[gpt_related_qna]`\n"
                 "    - `[adsense_inarticle]`\n"   
