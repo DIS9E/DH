@@ -18,8 +18,8 @@ __all__ = ["publish_post", "wp_selftest"]
 
 # ────────── 환경 변수 ──────────
 WP_URL          = (os.getenv("WP_URL") or "").strip().rstrip("/")      # ex) https://belatri.info
-WP_USERNAME     = (os.getenv("WP_USERNAME") or "").strip()             # 로그인 ID (공백/개행 제거)
-WP_APP_PASSWORD = (os.getenv("WP_APP_PASSWORD") or "").strip()         # 앱 비밀번호 (공백/개행 제거)
+WP_USERNAME     = (os.getenv("WP_USERNAME") or "").strip()             # 로그인 ID
+WP_APP_PASSWORD = (os.getenv("WP_APP_PASSWORD") or "").strip()         # 앱 비밀번호
 
 # ────────── 설정 ──────────
 UA = "BelatriBot/1.0 (+WP REST) requests"
@@ -52,7 +52,6 @@ def wp_selftest(session: requests.Session | None = None) -> bool:
     """
     Application Password 인증 자가 테스트.
     - /users/me 200이면 대체로 정상.
-    - 401/403/리버스프록시 문제는 본문 일부 로깅.
     """
     try:
         sess = session or _make_session()
@@ -82,7 +81,7 @@ def upload_image_to_wp(image_url: str, session: requests.Session) -> int | None:
 
         filename = os.path.basename(image_url.split("?")[0]) or "featured.jpg"
 
-        # Content-Type 강제 지정 (jpeg로 고정, 안정성 우선)
+        # Content-Type 강제 지정 (jpeg로 고정)
         headers = {
             "Content-Disposition": f"attachment; filename={filename}",
             "Content-Type": "image/jpeg"
@@ -93,6 +92,7 @@ def upload_image_to_wp(image_url: str, session: requests.Session) -> int | None:
         logging.info(f"[upload_image] POST {media_endpoint} → {up.status_code}")
 
         if up.status_code != 201:
+            logging.error(f"[upload_image] 실패 상태코드: {up.status_code}")
             logging.error(f"[upload_image] 실패 본문: {up.text[:500]}")
             return None
 
@@ -103,6 +103,7 @@ def upload_image_to_wp(image_url: str, session: requests.Session) -> int | None:
         logging.error(f"[upload_image] 예외: {e}", exc_info=True)
         return None
 
+
 def publish_post(
     title: str,
     content: str,
@@ -110,26 +111,25 @@ def publish_post(
     image_url: str | None = None,
     menu_items: list | None = None,
     reviews: list | None = None,
-    map_url: str | None = None,  # ← 새 인자
+    map_url: str | None = None,
 ):
     """
-    글 작성 + (선택) 대표 이미지 설정 + 지도 삽입.
-    태그/메타는 게시 후 yoast_meta.py의 push_meta()에서 처리.
+    글 작성 + 대표 이미지 + 지도 iframe 삽입.
+    카테고리는 벨라루스 맛집(2437)으로 고정.
     """
     if not _check_env():
         return None
 
     session = _make_session()
 
-    # 인증 사전 점검
     if not wp_selftest(session):
         logging.error("[publish_post] 인증 실패: Application Password/서버 설정 확인 필요")
         return None
 
-    # 1) slug 생성
+    # 슬러그 생성
     slug = slugify(title, separator="-", lowercase=True, allow_unicode=True)
 
-    # 2) 지도 삽입
+    # 지도 삽입
     if map_url:
         map_iframe = f"""
             <div style="margin-top:20px">
@@ -138,22 +138,24 @@ def publish_post(
         """.strip()
         content += f"\n\n{map_iframe}"
 
-    # 3) post_data
+    # 게시물 데이터
     post_data = {
         "title": title,
         "content": content,
         "status": "publish",
         "slug": slug,
-        "categories": [2437],  # ← 고정: 벨라루스 맛집
+        "categories": [2437],  # ← 벨라루스 맛집 고정
     }
 
-    # 4) 대표 이미지 업로드
+    # 대표 이미지 업로드
     if image_url:
         media_id = upload_image_to_wp(image_url, session)
         if media_id:
             post_data["featured_media"] = media_id
+        else:
+            logging.warning(f"[publish_post] 이미지 업로드 실패 또는 미디어 ID 없음: {image_url}")
 
-    # 5) 업로드
+    # 업로드 요청
     endpoint = f"{WP_URL}/wp-json/wp/v2/posts"
     try:
         resp = session.post(endpoint, json=post_data, timeout=TIMEOUT_POST)
@@ -162,9 +164,8 @@ def publish_post(
             logging.info(f"[publish_post] 게시 성공: {title}")
             return resp.json()
         else:
-            body = resp.text
             logging.error(f"[publish_post] 게시 실패 상태: {resp.status_code}")
-            logging.error(f"[publish_post] 실패 본문: {body[:1000]}")
+            logging.error(f"[publish_post] 실패 본문: {resp.text[:1000]}")
             return None
     except Exception as e:
         logging.error(f"[publish_post] 예외: {e}", exc_info=True)
