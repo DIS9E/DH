@@ -25,7 +25,6 @@ def parse_post(url):
     body_nodes = []
     if title_tag:
         for sib in title_tag.find_next_siblings():
-            # 태그 리스트 진입 전까지
             if sib.name == "div" and sib.get("class") and "text" in sib.get("class"):
                 break
             body_nodes.append(sib)
@@ -58,9 +57,11 @@ def parse_post(url):
         src = img["src"]
         images.append(urljoin(url, src))
 
-    # 지도 iframe URL (얀덱스 지도만 추출)
-    iframe = soup.find("iframe", src=re.compile(r"yandex\.ru/map-widget"))
+    # 지도 iframe URL → 얀덱스만 허용
+    iframe = soup.find("iframe")
     map_url = iframe.get("src", "") if iframe else ""
+    if not map_url.startswith("https://yandex.ru/map-widget"):
+        map_url = ""  # 얀덱스 지도가 아닌 경우는 제거
 
     return {
         "title": title,
